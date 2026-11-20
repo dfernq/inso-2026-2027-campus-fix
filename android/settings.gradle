@@ -1,0 +1,11 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+rootProject.name = 'campusfix-android'
+include 'app', 'model'
+project(':model').projectDir = file('../java/model')

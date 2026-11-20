@@ -10,3 +10,6 @@ build/
 # Python
 .venv/
 __pycache__/
+
+# Android
+/android/local.properties

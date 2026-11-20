@@ -26,6 +26,8 @@ cd python
 python -m campusfix
 ```
 
-See the [Java desktop guide](docs/java-desktop.md) and
-[Python desktop guide](docs/python-desktop.md) for configuration, tests,
+For Android, see the [Android guide](docs/android.md) for device setup and launch.
+
+The [Java desktop guide](docs/java-desktop.md) and
+[Python desktop guide](docs/python-desktop.md) cover configuration, tests,
 architecture, and changesets.

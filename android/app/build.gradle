@@ -1,0 +1,39 @@
+plugins {
+    id 'com.android.application' version '8.13.2'
+}
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+android {
+    namespace 'org.campusfix.android'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'org.campusfix.android'
+        minSdk 28
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+androidComponents {
+    beforeVariants(selector().withBuildType('release')) { variant ->
+        variant.enable = false
+    }
+}
+
+dependencies {
+    implementation project(':model')
+    implementation 'androidx.activity:activity:1.10.1'
+    implementation 'androidx.lifecycle:lifecycle-livedata:2.8.7'
+    implementation 'io.github.cdimascio:dotenv-java:3.2.0'
+}

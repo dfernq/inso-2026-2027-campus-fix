@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CampusFix</string>
+    <string name="check_connection">Check database connection</string>
+    <string name="connection_ready">Ready to check the database.</string>
+    <string name="connection_checking">Checking PostgreSQL…</string>
+    <string name="connection_connected">Connected to PostgreSQL.</string>
+    <string name="connection_unexpected_result">PostgreSQL returned an unexpected result.</string>
+    <string name="connection_configuration_error">Database settings are missing or invalid. Check the app configuration.</string>
+    <string name="connection_failed">Connection failed. Check your settings and PostgreSQL.</string>
+</resources>
