@@ -1,0 +1,23 @@
+name: campusfix
+
+services:
+  database:
+    image: postgres:18
+    environment:
+      POSTGRES_PASSWORD: ${CAMPUSFIX_POSTGRES_PASSWORD:?Set CAMPUSFIX_POSTGRES_PASSWORD in .env}
+      CAMPUSFIX_DB_USER: ${CAMPUSFIX_DB_USER:?Set CAMPUSFIX_DB_USER in .env}
+      CAMPUSFIX_DB_PASSWORD: ${CAMPUSFIX_DB_PASSWORD:?Set CAMPUSFIX_DB_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./database/001-create-databases.sql:/docker-entrypoint-initdb.d/001-create-databases.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  postgres-data:
+
