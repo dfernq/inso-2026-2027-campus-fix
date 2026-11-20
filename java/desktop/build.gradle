@@ -1,0 +1,30 @@
+plugins {
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+}
+
+dependencies {
+    implementation project(':model')
+    implementation 'io.github.cdimascio:dotenv-java:3.2.0'
+}
+
+application {
+    mainClass = 'org.campusfix.desktop.Main'
+}
+
+tasks.named('run') {
+    workingDir rootProject.projectDir.parentFile
+}
+

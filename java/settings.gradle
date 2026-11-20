@@ -1,0 +1,3 @@
+rootProject.name = 'campusfix-java'
+include 'model', 'desktop'
+
