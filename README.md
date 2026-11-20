@@ -2,17 +2,30 @@
 
 Campus maintenance reporting application.
 
-## Run the Java desktop client
+## Run locally
 
-Use JDK 17 or newer and Docker Compose. On first setup, copy `.env.example` to
-`.env` and set the database passwords. Then run these commands from the
-repository root:
+On first setup, copy `.env.example` to `.env` and set the database passwords.
+Start PostgreSQL from the repository root:
 
 ```sh
 docker compose up -d --wait
+```
+
+For Java, use JDK 17 or newer:
+
+```sh
 cd java
 ./gradlew :desktop:run
 ```
 
-See the [Java desktop guide](docs/java-desktop.md) for configuration, tests,
+For Python, [set up the virtual environment](docs/python-desktop.md#run-locally),
+then run:
+
+```sh
+cd python
+python -m campusfix
+```
+
+See the [Java desktop guide](docs/java-desktop.md) and
+[Python desktop guide](docs/python-desktop.md) for configuration, tests,
 architecture, and changesets.
