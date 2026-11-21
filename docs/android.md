@@ -1,5 +1,8 @@
 # Android client
 
+The Android client supports sign-in and sign-out for regular and administrator
+accounts.
+
 ## Changesets
 
 ### Foundation
@@ -8,21 +11,43 @@ The Android client checks its connection to PostgreSQL when the user taps
 **Check database connection**. It reads the connection settings from a private
 `.env` file on the device and queries `SELECT 1` through JDBC.
 
+### Account sign-in
+
+The sign-in form accepts a username and password. After sign-in, the account
+screen shows the username and role. Sign-out returns to the form.
+
 ## Architecture
 
 ```mermaid
 classDiagram
     direction LR
-    CampusFixApplication ..> ConnectionViewModel : creates
+    class CrudDao {
+        <<interface>>
+    }
+    CampusFixApplication ..> CampusFixViewModel : creates
     CampusFixApplication ..> DatabaseConnection : creates
-    MainActivity ..> ConnectionViewModel : observes and calls
-    ConnectionViewModel --> DatabaseConnection : database
+    MainActivity ..> CampusFixViewModel : observes and calls
+    CampusFixViewModel --> DatabaseConnection : database
+    CampusFixViewModel --> AuthenticationService : authentication
+    AuthenticationService --> UserDao : users
+    UserDao --> DatabaseConnection : database
+    CrudDao <|.. UserDao
 ```
 
-The Activity renders the XML layout and observes screen state through LiveData.
-The ViewModel runs the check on one worker and keeps its state across screen
-rotation. The Model opens and reuses an autocommit connection. When the
-ViewModel is cleared, it queues connection cleanup on the same worker.
+- **View.** `MainActivity` reads the form, forwards sign-in, sign-out, and
+  connection-check actions to the ViewModel, and renders its screen state.
+  The Activity obtains the ViewModel through `ViewModelProvider` and the
+  application factory.
+- **ViewModel.** `CampusFixViewModel` owns the screen state. Its `state()` method
+  exposes `LiveData<State>` for the Activity to observe. The ViewModel publishes
+  updates through its private `MutableLiveData`. After rotation, the new Activity
+  observes the same ViewModel and receives the current state. The ViewModel
+  runs authentication and connection checks on one worker and queues connection
+  cleanup there when cleared.
+- **Model.** `AuthenticationService` verifies credentials. `UserDao` uses
+  parameterized JDBC queries, maps database rows to users and credentials, and
+  implements `CrudDao`. `DatabaseConnection` opens and reuses an autocommit
+  connection.
 
 ## Run locally
 
@@ -32,14 +57,13 @@ For a virtual device, install the Android Emulator and an Android 15 or newer
 system image. The build uses SDK Platform 35 regardless of the device image.
 Android Studio can open the `android/` directory.
 
-On macOS with the default SDK location, set these variables in the terminal
-where you will run Gradle and `adb`. If you chose another SDK location, use
-that path for `ANDROID_HOME`.
+Android Studio configures the SDK path in `android/local.properties`.
+For terminal-only setup, set `sdk.dir` there once or use `ANDROID_HOME`.
+For example, for the default macOS SDK location, add the following line
+with your actual account name.
 
-```sh
-export ANDROID_HOME="$HOME/Library/Android/sdk"
-export PATH="$ANDROID_HOME/platform-tools:$PATH"
-adb version
+```properties
+sdk.dir=/Users/yourname/Library/Android/sdk
 ```
 
 Create an emulator in Device Manager or connect a debug device running
@@ -57,13 +81,22 @@ The launcher reuses a connected device or starts the only configured emulator.
 If you have several emulator profiles, start the one you want first or set
 `campusfix.avd` to its name in `android/local.properties`.
 
-Each run starts or reuses PostgreSQL, installs the app, forwards the database
-port, and replaces the app's private connection settings before opening it.
-You can rerun the same command after changing settings. A failed step returns
-you to your terminal. Emulator startup output goes to `android/build/emulator.log`.
+Each run starts or reuses PostgreSQL and applies `database/002-accounts.sql`.
+The migration preserves existing accounts. The launcher installs the app,
+forwards the database port, and replaces the app's private connection settings
+before opening it. A failed step returns you to your terminal. Emulator startup
+output goes to `android/build/emulator.log`.
 
-Tap **Check database connection**. Expect **Connected to PostgreSQL.** Rotate
-the device to confirm the result stays visible.
+| Username | Password | Role |
+| --- | --- | --- |
+| `alice` | `alice-demo` | Regular |
+| `bob` | `bob-demo` | Regular |
+| `admin` | `admin-demo` | Administrator |
+
+These sample accounts are for local development databases. Sign in to confirm
+the username and role, rotate the device to verify the account stays visible,
+and tap **Sign out** to return to the form. Use **Check database connection**
+on the sign-in screen to verify PostgreSQL access.
 
 The debug build keeps credentials out of the APK and Git. Use this client with
 a trusted local development database. An established connection is not recovered

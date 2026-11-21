@@ -1,8 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">CampusFix</string>
+    <string name="username">Username</string>
+    <string name="password">Password</string>
+    <string name="sign_in">Sign in</string>
+    <string name="sign_out">Sign out</string>
+    <string name="sign_in_ready">Sign in to CampusFix.</string>
+    <string name="signing_in">Signing in…</string>
+    <string name="invalid_credentials">Username or password is incorrect.</string>
+    <string name="sign_in_failed">Could not sign in. Check the database setup.</string>
+    <string name="regular_account">Regular account</string>
+    <string name="admin_account">Administrator account</string>
+    <string name="signed_in_as">Signed in as %1$s</string>
     <string name="check_connection">Check database connection</string>
-    <string name="connection_ready">Ready to check the database.</string>
     <string name="connection_checking">Checking PostgreSQL…</string>
     <string name="connection_connected">Connected to PostgreSQL.</string>
     <string name="connection_unexpected_result">PostgreSQL returned an unexpected result.</string>

@@ -4,14 +4,14 @@ import android.app.Application;
 import androidx.lifecycle.ViewModelProvider;
 import androidx.lifecycle.viewmodel.ViewModelInitializer;
 import io.github.cdimascio.dotenv.Dotenv;
-import org.campusfix.android.viewmodel.ConnectionViewModel;
+import org.campusfix.android.viewmodel.CampusFixViewModel;
 import org.campusfix.model.persistence.DatabaseConnection;
 
 public final class CampusFixApplication extends Application {
-    public ViewModelProvider.Factory connectionViewModelFactory() {
+    public ViewModelProvider.Factory viewModelFactory() {
         return ViewModelProvider.Factory.from(new ViewModelInitializer<>(
-                ConnectionViewModel.class,
-                extras -> new ConnectionViewModel(this::createDatabaseConnection)));
+                CampusFixViewModel.class,
+                extras -> new CampusFixViewModel(this::createDatabaseConnection)));
     }
 
     private DatabaseConnection createDatabaseConnection() {
