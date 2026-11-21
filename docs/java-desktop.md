@@ -1,6 +1,7 @@
 # Java desktop client
 
-The Swing client supports sign-in and sign-out for regular and administrator accounts.
+The Swing client lets regular users submit maintenance reports and review their
+own reports. Administrators can review reports from all users.
 
 ## Changesets
 
@@ -22,6 +23,12 @@ user from the Controller and returns to the sign-in screen.
 updating, and deleting accounts. The username lookup used for sign-in is specific
 to `UserDao`.
 
+### Submit and list maintenance reports
+
+Regular users submit a title, location, category, and description. New reports
+start in `OPEN`. `IssueService` applies the account role when submitting or
+listing reports. Each list shows the reporter and category name.
+
 ## Architecture
 
 The `java/model` module contains database access without a UI dependency.
@@ -38,26 +45,39 @@ classDiagram
     Main ..> DatabaseConnection : creates
     Main ..> AuthenticationService : creates
     Main ..> UserDao : creates
+    Main ..> IssueService : creates
+    Main ..> IssueDao : creates
+    Main ..> CategoryDao : creates
     CampusFixController --> CampusFixView : view
     CampusFixController --> DatabaseConnection : database
     CampusFixController --> AuthenticationService : authentication
+    CampusFixController --> IssueService : reports
     AuthenticationService --> UserDao : users
+    IssueService --> IssueDao : issues
+    IssueService --> CategoryDao : categories
     UserDao --> DatabaseConnection : database
-    UserDao ..|> CrudDao
+    IssueDao --> DatabaseConnection : database
+    CategoryDao --> DatabaseConnection : database
+    CrudDao <|.. UserDao
+    CrudDao <|.. IssueDao
+    CrudDao <|.. CategoryDao
 ```
 
-The dashed arrows show classes `Main` instantiates at startup. The solid arrows
-show references held in fields. The Controller creates its View and registers
-`Runnable` callbacks for sign-in, sign-out, connection checks, and window close.
-The View renders the screen and passes events through those callbacks.
+`Main` creates a `DatabaseConnection` and passes it to the three DAOs. The
+Controller creates its View and binds `Runnable` callbacks for sign-in, sign-out,
+connection checks, report submission, refresh, and window close. The View
+renders data from the Controller and forwards UI events through those callbacks.
 
 | Class | Responsibility |
 | --- | --- |
 | `Main` | Read `.env` connection settings, construct the Model objects, and start the Controller on Swing's event thread. |
 | `CampusFixController` | Create the View, keep the signed-in user in memory, and run database operations on one worker. |
-| `CampusFixView` | Render sign-in and account screens and expose events through callbacks. |
+| `CampusFixView` | Render the sign-in form, report form, and report list. |
 | `AuthenticationService` | Authenticate the submitted credentials and return the user on success. |
 | `UserDao` | Implement account CRUD and username lookup with parameterized SQL. |
+| `IssueService` | Validate report submissions and select the report list for the signed-in role. |
+| `IssueDao` | Persist issues and query their reporter and category names. |
+| `CategoryDao` | Persist categories and look up active categories. |
 | `DatabaseConnection` | Open, reuse, check, and close the JDBC connection. |
 
 Account passwords are stored as a 16-byte salt and a 32-byte PBKDF2-HMAC-SHA256
@@ -91,25 +111,36 @@ separately. Do not delete a data volume to apply configuration changes.
 For an existing PostgreSQL server, configure `.env` with its connection URLs and
 an already provisioned application role and databases.
 
-## Initialize accounts
+## Apply database migrations
 
-From the repository root, apply the account schema as the application database
-role. The script can be rerun and preserves existing accounts.
+Run these commands from the repository root after PostgreSQL starts. `002-accounts.sql`
+creates and seeds the accounts. `003-maintenance-reports.sql` creates the issue
+and category tables and adds the initial categories. You can rerun both scripts.
 
-```sh
-docker compose exec -T database sh -c \
-  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' < database/002-accounts.sql
-```
-
-For integration tests, also apply it to the separate test database:
+### Application database
 
 ```sh
 docker compose exec -T database sh -c \
-  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix_test' < database/002-accounts.sql
+  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
+  < database/002-accounts.sql &&
+docker compose exec -T database sh -c \
+  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
+  < database/003-maintenance-reports.sql
 ```
 
-If you use an existing PostgreSQL server, run `database/002-accounts.sql` on the
-application and test databases with `psql` as the configured application role.
+### Integration test database
+
+```sh
+docker compose exec -T database sh -c \
+  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix_test' \
+  < database/002-accounts.sql &&
+docker compose exec -T database sh -c \
+  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix_test' \
+  < database/003-maintenance-reports.sql
+```
+
+For an existing PostgreSQL server, apply both SQL files in order using the
+configured application role.
 
 | Username | Password | Role |
 | --- | --- | --- |
@@ -121,7 +152,7 @@ These sample accounts are for local development databases.
 
 ## Build and run
 
-From the repository root:
+Use these Gradle tasks from the repository root.
 
 ```sh
 cd java
@@ -132,9 +163,10 @@ cd java
 
 On Windows, use `gradlew.bat` instead of `./gradlew`.
 
-Sign in with a sample account. The window shows the account role and username.
-Use **Sign out** to return to sign-in. **Check database connection** is available
-on the sign-in screen. Closing the window shuts down the worker and connection.
+Sign in as `alice` or `bob` to submit a report and see **My reports**. Sign in as
+`admin` to see **All reports**. Select a row to read its description. Use
+**Refresh** to load changes made by another session and **Sign out** to return to
+sign-in. Closing the window shuts down the worker and connection.
 
 ## Configuration
 
@@ -172,12 +204,11 @@ port can be configured in `compose.yaml`; update both JDBC URLs accordingly.
 
 ## Verification
 
-- Run `test` to verify password checking against a reference hash and cover
-  connection settings and failures.
-- Run `:model:integrationTest` to check JDBC connection handling, account CRUD,
-  and PostgreSQL-backed sign-in with both roles and invalid credentials.
-- Sign in as `alice`, sign out, and sign in as `admin`. Verify each role and try
-  an incorrect password. Sign-in and connection checks run off the UI thread.
+- Run `test` for password checking, report validation, and connection settings.
+- Run `:model:integrationTest` for PostgreSQL-backed authentication, account CRUD,
+  connection reuse, report visibility by role, and active-category checks.
+- Submit a report as `alice`. Sign in as `bob` to confirm that his list excludes
+  Alice’s report, then sign in as `admin` to find it under **All reports**.
 
 ## Limitations
 

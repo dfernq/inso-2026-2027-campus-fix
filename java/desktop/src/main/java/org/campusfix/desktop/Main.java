@@ -4,8 +4,11 @@ import io.github.cdimascio.dotenv.Dotenv;
 import javax.swing.SwingUtilities;
 import org.campusfix.desktop.controller.CampusFixController;
 import org.campusfix.model.auth.AuthenticationService;
+import org.campusfix.model.persistence.CategoryDao;
 import org.campusfix.model.persistence.DatabaseConnection;
+import org.campusfix.model.persistence.IssueDao;
 import org.campusfix.model.persistence.UserDao;
+import org.campusfix.model.reports.IssueService;
 
 public final class Main {
     public static void main(String[] args) {
@@ -16,7 +19,8 @@ public final class Main {
                 settings.get("CAMPUSFIX_DB_PASSWORD"));
 
         var authentication = new AuthenticationService(new UserDao(database));
-        SwingUtilities.invokeLater(() -> new CampusFixController(database, authentication).start());
+        var reports = new IssueService(new IssueDao(database), new CategoryDao(database));
+        SwingUtilities.invokeLater(() -> new CampusFixController(database, authentication, reports).start());
     }
 }
 
