@@ -1,6 +1,7 @@
 # Python desktop client
 
-The Tkinter client supports sign-in and sign-out for regular and administrator accounts.
+The Tkinter client lets regular users submit maintenance reports and review
+their own reports. Administrators can review reports from all users.
 
 ## Changesets
 
@@ -21,6 +22,14 @@ clears the user from the Controller and returns to the form.
 `UserDao` implements `CrudDao` for creating, reading, updating, and deleting
 accounts. Username lookup is specific to `UserDao`.
 
+### Submit and list maintenance reports
+
+Regular users submit a title, location, category, and description. New reports
+start in `OPEN`. `IssueService` checks who can submit and selects the report list
+for the signed-in role. `IssueDao` and `CategoryDao` implement `CrudDao` and use
+parameterized queries to persist reports and categories. The list shows the
+reporter and category name alongside each report.
+
 ## Architecture
 
 ```mermaid
@@ -33,18 +42,28 @@ classDiagram
     Main ..> DatabaseConnection : creates
     Main ..> AuthenticationService : creates
     Main ..> UserDao : creates
+    Main ..> IssueService : creates
+    Main ..> IssueDao : creates
+    Main ..> CategoryDao : creates
     CampusFixController --> CampusFixView : view
     CampusFixController --> DatabaseConnection : database
     CampusFixController --> AuthenticationService : authentication
+    CampusFixController --> IssueService : reports
     AuthenticationService --> UserDao : users
+    IssueService --> IssueDao : issues
+    IssueService --> CategoryDao : categories
     UserDao --> DatabaseConnection : database
+    IssueDao --> DatabaseConnection : database
+    CategoryDao --> DatabaseConnection : database
     CrudDao <|.. UserDao
+    CrudDao <|.. IssueDao
+    CrudDao <|.. CategoryDao
 ```
 
-The entry point creates the Model objects and the Controller. The Controller
-creates the View and registers callbacks for sign-in, sign-out, and the
-connection check. The View renders the form and account screen and forwards
-actions through those callbacks.
+The entry point creates a `DatabaseConnection` and passes it to the three DAOs.
+The Controller creates the View and binds callbacks for account actions, report
+submission, refresh, and the connection check. The View renders the forms and
+report list and forwards actions through those callbacks.
 
 The Controller runs database work on one worker and updates the View on the
 Tkinter event thread. The Model opens a connection on first use and reuses it in
@@ -58,16 +77,20 @@ Use Python 3.10 or newer with Tkinter. Run `python3 -m tkinter` to check that Tk
 is available. Some Python distributions package Tkinter separately.
 
 From the repository root, configure `.env` from `.env.example`. With Docker
-running, start PostgreSQL and apply the account migration.
+running, start PostgreSQL and apply the account and maintenance-report migrations.
 
 ```sh
 docker compose up -d --wait &&
 docker compose exec -T database sh -c \
   'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
-  < database/002-accounts.sql
+  < database/002-accounts.sql &&
+docker compose exec -T database sh -c \
+  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
+  < database/003-maintenance-reports.sql
 ```
 
-You can rerun the migration. It preserves existing accounts.
+You can rerun both migrations. `003-maintenance-reports.sql` creates the issue
+and category tables and seeds the initial categories.
 
 ```sh
 cd python
@@ -86,8 +109,11 @@ On Windows, use `py -3` to create the environment and activate it with
 | `bob` | `bob-demo` | Regular |
 | `admin` | `admin-demo` | Administrator |
 
-These sample accounts are for local development databases. The sign-in screen
-also offers **Check database connection**.
+These sample accounts are for local development databases. Sign in as
+`alice` or `bob` to submit a report under **My reports**. Sign in as `admin` to
+see **All reports**. Select a row to read its description and use **Refresh**
+to load changes from another session. The sign-in screen offers **Check
+database connection**.
 
 The connection uses `CAMPUSFIX_DB_URL`, `CAMPUSFIX_DB_USER`, and
 `CAMPUSFIX_DB_PASSWORD`. Process environment variables override file settings.
@@ -104,12 +130,15 @@ python -m unittest discover -s tests
 
 For the integration tests, set `CAMPUSFIX_TEST_DB_URL` in `.env` to the JDBC URL
 for `campusfix_test`. The tests require a separate database whose name ends
-in `_test`. With PostgreSQL running, apply the migration from the repository root.
+in `_test`. With PostgreSQL running, apply both migrations from the repository root.
 
 ```sh
 docker compose exec -T database sh -c \
   'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix_test' \
-  < database/002-accounts.sql
+  < database/002-accounts.sql &&
+docker compose exec -T database sh -c \
+  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix_test' \
+  < database/003-maintenance-reports.sql
 ```
 
 Then run the integration suite from `python/` with the virtual environment active.
@@ -118,5 +147,6 @@ Then run the integration suite from `python/` with the virtual environment activ
 python -m unittest discover -s tests/integration
 ```
 
-The integration tests verify connection management, sign-in against the seeded
-accounts, and account CRUD operations.
+The unit tests cover report validation, password checking, and database settings.
+The integration tests cover connection handling, account CRUD, sign-in, report
+visibility by role, and active-category checks.

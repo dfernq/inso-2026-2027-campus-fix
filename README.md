@@ -19,8 +19,8 @@ cd java
 ./gradlew :desktop:run
 ```
 
-For Python, [set up the virtual environment](docs/python-desktop.md#run-locally),
-then run:
+For Python, [apply the migrations and set up the virtual environment](docs/python-desktop.md#run-locally).
+Then run the desktop client.
 
 ```sh
 cd python
