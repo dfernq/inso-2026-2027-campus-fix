@@ -3,8 +3,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from campusfix.controller.connection_controller import ConnectionController
+from campusfix.controller.campusfix_controller import CampusFixController
+from campusfix.model.auth.authentication_service import AuthenticationService
 from campusfix.model.persistence.database_connection import DatabaseConnection
+from campusfix.model.persistence.user_dao import UserDao
 
 
 def main() -> None:
@@ -22,7 +24,9 @@ def main() -> None:
     except ValueError as error:
         raise SystemExit(str(error)) from None
 
-    ConnectionController(database).start()
+    users = UserDao(database)
+    authentication = AuthenticationService(users)
+    CampusFixController(database, authentication).start()
 
 
 if __name__ == "__main__":
