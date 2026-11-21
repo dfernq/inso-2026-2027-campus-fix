@@ -24,7 +24,7 @@ public final class DatabaseConnection implements AutoCloseable {
 
     private static void requireSetting(String value, String name) {
         if (value == null || value.trim().isEmpty()) {
-            throw new IllegalArgumentException(name + " must be provided.");
+            throw new IllegalArgumentException(String.format("%s must be provided.", name));
         }
     }
 

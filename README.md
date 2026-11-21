@@ -11,7 +11,7 @@ Start PostgreSQL from the repository root:
 docker compose up -d --wait
 ```
 
-For Java, use JDK 17 or newer:
+For Java, use JDK 17 or newer and [initialize the accounts](docs/java-desktop.md#initialize-accounts):
 
 ```sh
 cd java

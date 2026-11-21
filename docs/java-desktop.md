@@ -1,15 +1,26 @@
 # Java desktop client
 
-The Swing client verifies PostgreSQL connectivity using a UI-independent Model.
+The Swing client supports sign-in and sign-out for regular and administrator accounts.
 
 ## Changesets
 
 ### Foundation
 
 The first changeset establishes the Java 17 build, the Swing MVC structure,
-and local PostgreSQL configuration. The desktop window runs a connection check
-through JDBC and displays the result. The check verifies that the application
-can load its settings, connect to the database, and run a query.
+and local PostgreSQL configuration. It adds a JDBC connection check to verify
+that the application can load its settings, connect, and run a query.
+
+### Account sign-in
+
+Java can sign in as a regular user or an administrator and displays a matching
+account screen. The `UserDao` uses a parameterized JDBC query and maps the row
+to a `User` and its credentials. `AuthenticationService` checks the password
+and returns the authenticated `User` to the Controller. Sign-out clears the
+user from the Controller and returns to the sign-in screen.
+
+`UserDao` implements the shared `CrudDao` interface for creating, reading,
+updating, and deleting accounts. The username lookup used for sign-in is specific
+to `UserDao`.
 
 ## Architecture
 
@@ -20,27 +31,38 @@ Controller, and View.
 ```mermaid
 classDiagram
     direction LR
-    Main ..> ConnectionController : creates
+    class CrudDao {
+        <<interface>>
+    }
+    Main ..> CampusFixController : creates
     Main ..> DatabaseConnection : creates
-    ConnectionController --> ConnectionView : view
-    ConnectionController --> DatabaseConnection : database
+    Main ..> AuthenticationService : creates
+    Main ..> UserDao : creates
+    CampusFixController --> CampusFixView : view
+    CampusFixController --> DatabaseConnection : database
+    CampusFixController --> AuthenticationService : authentication
+    AuthenticationService --> UserDao : users
+    UserDao --> DatabaseConnection : database
+    UserDao ..|> CrudDao
 ```
 
 The dashed arrows show classes `Main` instantiates at startup. The solid arrows
-show references the Controller keeps in fields. The Controller creates its View
-and supplies `Runnable` callbacks for check and close events. The View invokes
-those callbacks through the `Runnable` interface.
+show references held in fields. The Controller creates its View and registers
+`Runnable` callbacks for sign-in, sign-out, connection checks, and window close.
+The View renders the screen and passes events through those callbacks.
 
 | Class | Responsibility |
 | --- | --- |
-| `Main` | Read `.env` connection settings, supply the Model dependency, start the Controller on Swing's event thread. |
-| `ConnectionController` | Create the View, bind events, run Model calls on one worker, render outcomes, and coordinate shutdown. |
-| `ConnectionView` | Construct Swing widgets, display strings, and expose check/close events through callbacks. |
-| `DatabaseConnection` | Open and reuse a JDBC connection, execute `SELECT 1`, close query resources, and close the connection. |
+| `Main` | Read `.env` connection settings, construct the Model objects, and start the Controller on Swing's event thread. |
+| `CampusFixController` | Create the View, keep the signed-in user in memory, and run database operations on one worker. |
+| `CampusFixView` | Render sign-in and account screens and expose events through callbacks. |
+| `AuthenticationService` | Authenticate the submitted credentials and return the user on success. |
+| `UserDao` | Implement account CRUD and username lookup with parameterized SQL. |
+| `DatabaseConnection` | Open, reuse, check, and close the JDBC connection. |
 
-The Model currently contains connection management and the connectivity query.
-The connection object is created by the application bootstrap and supplied to
-the Controller.
+Account passwords are stored as a 16-byte salt and a 32-byte PBKDF2-HMAC-SHA256
+hash derived with 600,000 iterations. The account roles are distinct from the
+PostgreSQL login role used to connect to the database.
 
 ## Start PostgreSQL
 
@@ -60,8 +82,7 @@ Compose reads `.env` and passes the configured credentials to PostgreSQL. The
 initialization script uses psql's `\getenv` command to read the application role
 and password. Identifiers and password literals are quoted through psql variables.
 It creates the `campusfix` and `campusfix_test` databases, owned by the configured
-application role, without creating application tables. The separate setup
-superuser is only used to initialize the server.
+application role. The separate setup superuser initializes the server.
 
 Initialization runs only when the Compose volume is empty. Changing `.env` does
 not update an existing role or password; update existing database credentials
@@ -69,6 +90,34 @@ separately. Do not delete a data volume to apply configuration changes.
 
 For an existing PostgreSQL server, configure `.env` with its connection URLs and
 an already provisioned application role and databases.
+
+## Initialize accounts
+
+From the repository root, apply the account schema as the application database
+role. The script can be rerun and preserves existing accounts.
+
+```sh
+docker compose exec -T database sh -c \
+  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' < database/002-accounts.sql
+```
+
+For integration tests, also apply it to the separate test database:
+
+```sh
+docker compose exec -T database sh -c \
+  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix_test' < database/002-accounts.sql
+```
+
+If you use an existing PostgreSQL server, run `database/002-accounts.sql` on the
+application and test databases with `psql` as the configured application role.
+
+| Username | Password | Role |
+| --- | --- | --- |
+| `alice` | `alice-demo` | Regular |
+| `bob` | `bob-demo` | Regular |
+| `admin` | `admin-demo` | Administrator |
+
+These sample accounts are for local development databases.
 
 ## Build and run
 
@@ -83,9 +132,9 @@ cd java
 
 On Windows, use `gradlew.bat` instead of `./gradlew`.
 
-Click **Check database connection**. The button is disabled while the worker
-executes the query, and the screen should show **Connected to PostgreSQL.**
-Closing the window queues connection cleanup on the same worker and shuts it down.
+Sign in with a sample account. The window shows the account role and username.
+Use **Sign out** to return to sign-in. **Check database connection** is available
+on the sign-in screen. Closing the window shuts down the worker and connection.
 
 ## Configuration
 
@@ -123,12 +172,12 @@ port can be configured in `compose.yaml`; update both JDBC URLs accordingly.
 
 ## Verification
 
-- Run `test`: required connection settings and connection failures are checked.
-- Run `:model:integrationTest`: it executes a real query, verifies connection reuse
-  and autocommit, and verifies that closing the Model closes JDBC resources.
-- Try an incorrect password: the screen reports failure and enables another
-  check. Driver details are logged to the terminal rather than displayed.
-- During a slow/unavailable connection, the window should remain responsive.
+- Run `test` to verify password checking against a reference hash and cover
+  connection settings and failures.
+- Run `:model:integrationTest` to check JDBC connection handling, account CRUD,
+  and PostgreSQL-backed sign-in with both roles and invalid credentials.
+- Sign in as `alice`, sign out, and sign in as `admin`. Verify each role and try
+  an incorrect password. Sign-in and connection checks run off the UI thread.
 
 ## Limitations
 
