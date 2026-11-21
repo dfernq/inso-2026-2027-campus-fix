@@ -77,6 +77,9 @@ docker compose up -d --wait
 docker compose exec -T database sh -c \
   'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
   < database/002-accounts.sql
+docker compose exec -T database sh -c \
+  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
+  < database/003-maintenance-reports.sql
 ./java/gradlew -p android :app:installDebug
 adb reverse tcp:5432 tcp:5432
 printf '%s\n' "$settings" | adb shell -T \

@@ -1,7 +1,7 @@
 # Android client
 
-The Android client supports sign-in and sign-out for regular and administrator
-accounts.
+The Android client lets regular users submit maintenance reports and review
+their own reports. Administrators can review reports from all users.
 
 ## Changesets
 
@@ -16,6 +16,13 @@ The Android client checks its connection to PostgreSQL when the user taps
 The sign-in form accepts a username and password. After sign-in, the account
 screen shows the username and role. Sign-out returns to the form.
 
+### Submit and list maintenance reports
+
+Regular users submit a title, location, category, and description. New reports
+start in `OPEN`. The ViewModel loads active categories for the report form and
+publishes the report list for the signed-in account. **Refresh** loads changes
+from other sessions.
+
 ## Architecture
 
 ```mermaid
@@ -29,25 +36,31 @@ classDiagram
     MainActivity ..> CampusFixViewModel : observes and calls
     CampusFixViewModel --> DatabaseConnection : database
     CampusFixViewModel --> AuthenticationService : authentication
+    CampusFixViewModel --> IssueService : reports
     AuthenticationService --> UserDao : users
+    IssueService --> IssueDao : issues
+    IssueService --> CategoryDao : categories
     UserDao --> DatabaseConnection : database
+    IssueDao --> DatabaseConnection : database
+    CategoryDao --> DatabaseConnection : database
     CrudDao <|.. UserDao
+    CrudDao <|.. IssueDao
+    CrudDao <|.. CategoryDao
 ```
 
-- **View.** `MainActivity` reads the form, forwards sign-in, sign-out, and
-  connection-check actions to the ViewModel, and renders its screen state.
-  The Activity obtains the ViewModel through `ViewModelProvider` and the
-  application factory.
-- **ViewModel.** `CampusFixViewModel` owns the screen state. Its `state()` method
-  exposes `LiveData<State>` for the Activity to observe. The ViewModel publishes
-  updates through its private `MutableLiveData`. After rotation, the new Activity
-  observes the same ViewModel and receives the current state. The ViewModel
-  runs authentication and connection checks on one worker and queues connection
-  cleanup there when cleared.
-- **Model.** `AuthenticationService` verifies credentials. `UserDao` uses
-  parameterized JDBC queries, maps database rows to users and credentials, and
-  implements `CrudDao`. `DatabaseConnection` opens and reuses an autocommit
-  connection.
+- **View.** `MainActivity` reads the forms, forwards actions, and renders the
+  ViewModel's state. The Activity keeps the report draft across rotation and
+  clears it after a successful submission or sign-out. It obtains the
+  ViewModel through `ViewModelProvider` and the application factory.
+- **ViewModel.** `CampusFixViewModel` owns the account, reports, category options,
+  and operation status. Its `state()` method exposes `LiveData<State>` for the
+  Activity to observe. Updates go through a private `MutableLiveData`. The same
+  ViewModel serves the recreated Activity after rotation. One worker runs
+  database operations and closes the connection when the ViewModel is cleared.
+- **Model.** `AuthenticationService` verifies credentials, and `IssueService`
+  validates submissions and selects reports by role. The DAOs implement
+  `CrudDao` with parameterized JDBC queries. `DatabaseConnection` opens and
+  reuses an autocommit connection.
 
 ## Run locally
 
@@ -81,11 +94,12 @@ The launcher reuses a connected device or starts the only configured emulator.
 If you have several emulator profiles, start the one you want first or set
 `campusfix.avd` to its name in `android/local.properties`.
 
-Each run starts or reuses PostgreSQL and applies `database/002-accounts.sql`.
-The migration preserves existing accounts. The launcher installs the app,
-forwards the database port, and replaces the app's private connection settings
-before opening it. A failed step returns you to your terminal. Emulator startup
-output goes to `android/build/emulator.log`.
+Each run starts or reuses PostgreSQL and applies
+`database/002-accounts.sql` and `database/003-maintenance-reports.sql`.
+Both scripts preserve existing accounts and reports. The
+launcher installs the app, forwards the database port, and replaces the app's
+private connection settings before opening it. A failed step returns you to
+your terminal. Emulator startup output goes to `android/build/emulator.log`.
 
 | Username | Password | Role |
 | --- | --- | --- |
@@ -93,10 +107,15 @@ output goes to `android/build/emulator.log`.
 | `bob` | `bob-demo` | Regular |
 | `admin` | `admin-demo` | Administrator |
 
-These sample accounts are for local development databases. Sign in to confirm
-the username and role, rotate the device to verify the account stays visible,
-and tap **Sign out** to return to the form. Use **Check database connection**
-on the sign-in screen to verify PostgreSQL access.
+These sample accounts are for local development databases.
+
+## Verification
+
+Submit a report as `alice` and verify that it appears under **My reports**.
+Rotate the device to confirm the report stays visible. Tap **Sign out**, then
+sign in as `bob` and confirm that Alice’s report is absent. Sign in as `admin`
+to find it under **All reports**. Use **Check database connection** on the
+sign-in screen to verify PostgreSQL access.
 
 The debug build keeps credentials out of the APK and Git. Use this client with
 a trusted local development database. An established connection is not recovered

@@ -1,20 +1,27 @@
 package org.campusfix.android.viewmodel;
 
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
 import androidx.lifecycle.ViewModel;
 import io.github.cdimascio.dotenv.DotenvException;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 import org.campusfix.android.R;
 import org.campusfix.model.auth.AuthenticationService;
 import org.campusfix.model.domain.User;
+import org.campusfix.model.persistence.CategoryDao;
 import org.campusfix.model.persistence.DatabaseConnection;
+import org.campusfix.model.persistence.IssueDao;
 import org.campusfix.model.persistence.UserDao;
+import org.campusfix.model.reports.IssueService;
 
 public final class CampusFixViewModel extends ViewModel {
     private static final String TAG = "CampusFixViewModel";
@@ -45,12 +52,31 @@ public final class CampusFixViewModel extends ViewModel {
         }
     }
 
-    public record AccountDisplay(String username, int title) {
+    public record AccountDisplay(String username, int title, boolean canSubmit) {
     }
 
-    public record State(Status signInStatus, AccountDisplay account) {
+    public record CategoryOption(long id, String name) {
+    }
+
+    public record ReportDisplay(long id, String title, String category, String location,
+                                String reporter, String status, String description) {
+    }
+
+    public record ReportsState(List<ReportDisplay> items, List<CategoryOption> categories,
+                               int message, String validationMessage, boolean busy,
+                               long submittedIssueId) {
+        private ReportsState withStatus(int message, boolean busy) {
+            return new ReportsState(items, categories, message, null, busy, submittedIssueId);
+        }
+
+        private ReportsState withValidationMessage(String validationMessage) {
+            return new ReportsState(items, categories, 0, validationMessage, false, submittedIssueId);
+        }
+    }
+
+    public record State(Status signInStatus, AccountDisplay account, ReportsState reports) {
         private State(Status signInStatus) {
-            this(signInStatus, null);
+            this(signInStatus, null, null);
         }
     }
 
@@ -58,8 +84,11 @@ public final class CampusFixViewModel extends ViewModel {
     // See https://developer.android.com/topic/libraries/architecture/livedata#create_livedata_objects
     private final MutableLiveData<State> state = new MutableLiveData<>(new State(Status.READY));
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final Handler mainThread = new Handler(Looper.getMainLooper());
     private DatabaseConnection database;
     private AuthenticationService authentication;
+    private IssueService issues;
+    private User signedInUser;
 
     public CampusFixViewModel(Supplier<DatabaseConnection> createDatabase) {
         this.createDatabase = createDatabase;
@@ -75,11 +104,12 @@ public final class CampusFixViewModel extends ViewModel {
             return;
         }
         state.setValue(new State(Status.SIGNING_IN));
-        worker.execute(() -> state.postValue(authenticate(username, password)));
+        worker.execute(() -> authenticate(username, password));
     }
 
     public void signOut() {
-        if (state.getValue().account() != null) {
+        if (signedInUser != null) {
+            signedInUser = null;
             state.setValue(new State(Status.READY));
         }
     }
@@ -97,23 +127,113 @@ public final class CampusFixViewModel extends ViewModel {
         return current.account() == null && !current.signInStatus().busy();
     }
 
-    private State authenticate(String username, char[] password) {
+    private void authenticate(String username, char[] password) {
         try {
             var user = authentication().signIn(username, password).orElse(null);
             if (user == null) {
-                return new State(Status.INVALID_CREDENTIALS);
+                state.postValue(new State(Status.INVALID_CREDENTIALS));
+                return;
             }
-            int title = user.role() == User.Role.ADMIN
-                    ? R.string.admin_account : R.string.regular_account;
-            return new State(Status.READY, new AccountDisplay(user.username(), title));
+            mainThread.post(() -> completeSignIn(user));
         } catch (DotenvException | IllegalArgumentException exception) {
-            return new State(Status.CONFIGURATION_ERROR);
+            state.postValue(new State(Status.CONFIGURATION_ERROR));
         } catch (SQLException | IllegalStateException exception) {
             Log.w(TAG, "Sign-in failed.", exception);
-            return new State(Status.SIGN_IN_FAILED);
+            state.postValue(new State(Status.SIGN_IN_FAILED));
         } finally {
             Arrays.fill(password, '\0');
         }
+    }
+
+    private void completeSignIn(User user) {
+        if (worker.isShutdown()) {
+            return;
+        }
+        signedInUser = user;
+        boolean regular = user.role() == User.Role.REGULAR;
+        int title = regular ? R.string.regular_account : R.string.admin_account;
+        var account = new AccountDisplay(user.username(), title, regular);
+        var initialReports = new ReportsState(List.of(), List.of(), R.string.reports_loading, null, true, 0);
+        state.setValue(new State(Status.READY, account, initialReports));
+        loadReports(user, initialReports);
+    }
+
+    public void refreshReports() {
+        var reports = state.getValue().reports();
+        if (reports == null || reports.busy()) {
+            return;
+        }
+        showReports(reports.withStatus(R.string.reports_loading, true));
+        loadReports(signedInUser, reports);
+    }
+
+    public void submitReport(long categoryId, String title, String description, String location) {
+        var reports = state.getValue().reports();
+        if (reports == null || reports.busy()) {
+            return;
+        }
+
+        var reporter = signedInUser;
+        showReports(reports.withStatus(R.string.report_submitting, true));
+        worker.execute(() -> {
+            try {
+                var issue = issues().submit(reporter, categoryId, title, description, location);
+                publishReports(reporter, readReports(reporter, reports, issue.id()));
+            } catch (IllegalArgumentException exception) {
+                publishReports(reporter, reports.withValidationMessage(exception.getMessage()));
+            } catch (SQLException exception) {
+                Log.w(TAG, "Submitting the report failed.", exception);
+                publishReports(reporter, reports.withStatus(R.string.report_submit_failed, false));
+            }
+        });
+    }
+
+    private void loadReports(User viewer, ReportsState previous) {
+        worker.execute(() -> publishReports(viewer, readReports(viewer, previous, 0)));
+    }
+
+    private ReportsState readReports(User viewer, ReportsState previous, long newIssueId) {
+        boolean submitted = newIssueId != 0;
+        long submittedIssueId = submitted ? newIssueId : previous.submittedIssueId();
+        try {
+            var reports = new ArrayList<ReportDisplay>();
+            for (var summary : issues().list(viewer)) {
+                var issue = summary.issue();
+                reports.add(new ReportDisplay(issue.id(), issue.title(), summary.categoryName(),
+                        issue.location(), summary.reporterName(), issue.status().name(), issue.description()));
+            }
+
+            var categories = new ArrayList<CategoryOption>();
+            if (viewer.role() == User.Role.REGULAR) {
+                for (var category : issues().activeCategories()) {
+                    categories.add(new CategoryOption(category.id(), category.name()));
+                }
+            }
+
+            int message = reports.isEmpty() ? R.string.reports_empty : R.string.reports_loaded;
+            if (submitted) {
+                message = R.string.report_submitted;
+            }
+            return new ReportsState(List.copyOf(reports), List.copyOf(categories),
+                    message, null, false, submittedIssueId);
+        } catch (SQLException exception) {
+            Log.w(TAG, "Loading reports failed.", exception);
+            int message = submitted ? R.string.report_submitted_refresh_failed : R.string.reports_load_failed;
+            return new ReportsState(previous.items(), previous.categories(),
+                    message, null, false, submittedIssueId);
+        }
+    }
+
+    private void publishReports(User viewer, ReportsState reports) {
+        mainThread.post(() -> {
+            if (signedInUser == viewer) {
+                showReports(reports);
+            }
+        });
+    }
+
+    private void showReports(ReportsState reports) {
+        state.setValue(new State(Status.READY, state.getValue().account(), reports));
     }
 
     private Status checkDatabase() {
@@ -141,8 +261,17 @@ public final class CampusFixViewModel extends ViewModel {
         return authentication;
     }
 
+    private IssueService issues() {
+        if (issues == null) {
+            var connection = database();
+            issues = new IssueService(new IssueDao(connection), new CategoryDao(connection));
+        }
+        return issues;
+    }
+
     @Override
     protected void onCleared() {
+        signedInUser = null;
         worker.execute(this::closeDatabase);
         worker.shutdown();
     }

@@ -76,12 +76,111 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp" />
 
-            <Button
-                android:id="@+id/sign_out"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                style="?android:attr/buttonBarStyle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/refresh_reports"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/refresh_reports" />
+
+                <Button
+                    android:id="@+id/sign_out"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="@string/sign_out" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/report_form"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:accessibilityHeading="true"
+                    android:text="@string/new_report"
+                    android:textAppearance="?android:attr/textAppearanceMedium" />
+
+                <EditText
+                    android:id="@+id/report_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/report_title"
+                    android:importantForAutofill="no"
+                    android:imeOptions="actionNext"
+                    android:inputType="textCapSentences"
+                    android:saveEnabled="false" />
+
+                <EditText
+                    android:id="@+id/report_location"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/report_location"
+                    android:importantForAutofill="no"
+                    android:imeOptions="actionNext"
+                    android:inputType="textCapSentences"
+                    android:saveEnabled="false" />
+
+                <Spinner
+                    android:id="@+id/report_category"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:saveEnabled="false" />
+
+                <EditText
+                    android:id="@+id/report_description"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="top"
+                    android:hint="@string/report_description"
+                    android:importantForAutofill="no"
+                    android:inputType="textCapSentences|textMultiLine"
+                    android:maxLines="5"
+                    android:minLines="2"
+                    android:saveEnabled="false" />
+
+                <Button
+                    android:id="@+id/submit_report"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/submit_report" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/report_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:accessibilityLiveRegion="polite" />
+
+            <TextView
+                android:id="@+id/reports_title"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
-                android:text="@string/sign_out" />
+                android:accessibilityHeading="true"
+                android:textAppearance="?android:attr/textAppearanceMedium" />
+
+            <LinearLayout
+                android:id="@+id/report_list"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
         </LinearLayout>
     </FrameLayout>
 </ScrollView>
