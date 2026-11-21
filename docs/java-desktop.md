@@ -1,7 +1,8 @@
 # Java desktop client
 
 The Swing client lets regular users submit maintenance reports and review their
-own reports. Administrators can review reports from all users.
+own reports. They can edit or cancel a report while it is open. Administrators
+can review reports from all users.
 
 ## Changesets
 
@@ -28,6 +29,16 @@ to `UserDao`.
 Regular users submit a title, location, category, and description. New reports
 start in `OPEN`. `IssueService` applies the account role when submitting or
 listing reports. Each list shows the reporter and category name.
+
+### Edit and cancel open reports
+
+Regular users can edit or cancel their own open reports. Editing uses the same
+field validation as submission and requires an active category. Cancellation
+sets the report to `CANCELLED` and keeps it visible in report lists.
+
+`IssueService` checks the account role. The update statements check the
+reporter and current status in PostgreSQL so an action from an older screen
+cannot edit or cancel a report after its status changes.
 
 ## Architecture
 
@@ -65,7 +76,7 @@ classDiagram
 
 `Main` creates a `DatabaseConnection` and passes it to the three DAOs. The
 Controller creates its View and binds `Runnable` callbacks for sign-in, sign-out,
-connection checks, report submission, refresh, and window close. The View
+connection checks, report actions, refresh, and window close. The View
 renders data from the Controller and forwards UI events through those callbacks.
 
 | Class | Responsibility |
@@ -75,7 +86,7 @@ renders data from the Controller and forwards UI events through those callbacks.
 | `CampusFixView` | Render the sign-in form, report form, and report list. |
 | `AuthenticationService` | Authenticate the submitted credentials and return the user on success. |
 | `UserDao` | Implement account CRUD and username lookup with parameterized SQL. |
-| `IssueService` | Validate report submissions and select the report list for the signed-in role. |
+| `IssueService` | Validate report submissions and edits, check permissions, and select the list for the signed-in role. |
 | `IssueDao` | Persist issues and query their reporter and category names. |
 | `CategoryDao` | Persist categories and look up active categories. |
 | `DatabaseConnection` | Open, reuse, check, and close the JDBC connection. |
@@ -115,7 +126,8 @@ an already provisioned application role and databases.
 
 Run these commands from the repository root after PostgreSQL starts. `002-accounts.sql`
 creates and seeds the accounts. `003-maintenance-reports.sql` creates the issue
-and category tables and adds the initial categories. You can rerun both scripts.
+and category tables and adds the initial categories. `004-report-cancellation.sql`
+allows reports to be marked `CANCELLED`. The scripts are safe to rerun.
 
 ### Application database
 
@@ -125,7 +137,10 @@ docker compose exec -T database sh -c \
   < database/002-accounts.sql &&
 docker compose exec -T database sh -c \
   'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
-  < database/003-maintenance-reports.sql
+  < database/003-maintenance-reports.sql &&
+docker compose exec -T database sh -c \
+  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
+  < database/004-report-cancellation.sql
 ```
 
 ### Integration test database
@@ -136,10 +151,13 @@ docker compose exec -T database sh -c \
   < database/002-accounts.sql &&
 docker compose exec -T database sh -c \
   'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix_test' \
-  < database/003-maintenance-reports.sql
+  < database/003-maintenance-reports.sql &&
+docker compose exec -T database sh -c \
+  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix_test' \
+  < database/004-report-cancellation.sql
 ```
 
-For an existing PostgreSQL server, apply both SQL files in order using the
+For an existing PostgreSQL server, apply the SQL files in order using the
 configured application role.
 
 | Username | Password | Role |
@@ -163,10 +181,11 @@ cd java
 
 On Windows, use `gradlew.bat` instead of `./gradlew`.
 
-Sign in as `alice` or `bob` to submit a report and see **My reports**. Sign in as
-`admin` to see **All reports**. Select a row to read its description. Use
-**Refresh** to load changes made by another session and **Sign out** to return to
-sign-in. Closing the window shuts down the worker and connection.
+Sign in as `alice` or `bob` to submit a report and see **My reports**. Select
+an open report and choose **Edit report** to load it into the form, or choose
+**Cancel report** and confirm to mark it `CANCELLED`. Sign in as `admin` to
+see **All reports**. Use **Refresh** to load changes made by another session.
+Closing the window shuts down the worker and connection.
 
 ## Configuration
 
@@ -206,9 +225,12 @@ port can be configured in `compose.yaml`; update both JDBC URLs accordingly.
 
 - Run `test` for password checking, report validation, and connection settings.
 - Run `:model:integrationTest` for PostgreSQL-backed authentication, account CRUD,
-  connection reuse, report visibility by role, and active-category checks.
-- Submit a report as `alice`. Sign in as `bob` to confirm that his list excludes
-  Alice’s report, then sign in as `admin` to find it under **All reports**.
+  connection reuse, report visibility by role, active-category checks, and edit
+  and cancellation permissions.
+- Submit and edit a report as `alice`, then cancel it. Confirm that its row
+  shows `CANCELLED` and that the edit and cancel actions are disabled.
+  Sign in as `bob` to confirm it is absent, then as `admin` to find it under
+  **All reports**.
 
 ## Limitations
 

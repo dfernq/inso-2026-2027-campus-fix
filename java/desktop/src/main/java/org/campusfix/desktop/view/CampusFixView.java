@@ -13,6 +13,7 @@ import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JScrollPane;
@@ -30,8 +31,9 @@ public final class CampusFixView {
         }
     }
 
-    public record ReportRow(long id, String title, String category, String location,
-                            String reporter, String status, String description) {
+    public record ReportRow(long id, String title, long categoryId, String category,
+                            String location, String reporter, String status,
+                            String description, boolean canManage) {
     }
 
     private final JFrame frame = new JFrame("CampusFix");
@@ -53,6 +55,10 @@ public final class CampusFixView {
     private final JComboBox<CategoryOption> reportCategory = new JComboBox<>();
     private final JTextArea reportDescription = new JTextArea(3, 28);
     private final JButton submit = new JButton("Submit report");
+    private final JButton discardEdit = new JButton("Discard edit");
+    private final JButton edit = new JButton("Edit report");
+    private final JButton cancelReport = new JButton("Cancel report");
+    private final JPanel reportActions = new JPanel(new FlowLayout(FlowLayout.LEADING));
     private final JPanel reportForm;
     private final JTextArea selectedDescription = new JTextArea(3, 28);
     private final DefaultTableModel reportTable = new DefaultTableModel(
@@ -64,6 +70,7 @@ public final class CampusFixView {
     };
     private final JTable reports = new JTable(reportTable);
     private List<ReportRow> displayedReports = List.of();
+    private boolean reportBusy;
 
     public CampusFixView() {
         reportForm = createReportForm();
@@ -118,17 +125,23 @@ public final class CampusFixView {
         reports.setFillsViewportHeight(true);
         reports.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         reports.getColumnModel().getColumn(0).setMaxWidth(60);
-        reports.getSelectionModel().addListSelectionListener(event -> showSelectedDescription());
+        reports.getSelectionModel().addListSelectionListener(event -> showSelectedReport());
         selectedDescription.setEditable(false);
         selectedDescription.setLineWrap(true);
         selectedDescription.setWrapStyleWord(true);
         var details = new JScrollPane(selectedDescription);
         details.setBorder(BorderFactory.createTitledBorder("Report description"));
 
+        reportActions.add(edit);
+        reportActions.add(cancelReport);
+        var reportDetails = new JPanel(new BorderLayout());
+        reportDetails.add(details, BorderLayout.CENTER);
+        reportDetails.add(reportActions, BorderLayout.SOUTH);
+
         var panel = new JPanel(new BorderLayout(0, 8));
         panel.add(reportListTitle, BorderLayout.NORTH);
         panel.add(new JScrollPane(reports), BorderLayout.CENTER);
-        panel.add(details, BorderLayout.SOUTH);
+        panel.add(reportDetails, BorderLayout.SOUTH);
         return panel;
     }
 
@@ -146,8 +159,9 @@ public final class CampusFixView {
         description.add(descriptionLabel, BorderLayout.NORTH);
         description.add(new JScrollPane(reportDescription), BorderLayout.CENTER);
 
-        var actions = new JPanel(new FlowLayout(FlowLayout.LEADING, 0, 0));
+        var actions = new JPanel(new FlowLayout(FlowLayout.LEADING));
         actions.add(submit);
+        actions.add(discardEdit);
         var form = new JPanel(new BorderLayout(0, 8));
         form.setBorder(BorderFactory.createTitledBorder("New maintenance report"));
         form.add(fields, BorderLayout.NORTH);
@@ -163,11 +177,24 @@ public final class CampusFixView {
         fields.add(field);
     }
 
-    private void showSelectedDescription() {
+    public ReportRow selectedReport() {
         int index = reports.getSelectedRow();
-        String description = index < 0 ? "" : displayedReports.get(index).description();
-        selectedDescription.setText(description);
+        return index < 0 ? null : displayedReports.get(index);
+    }
+
+    private void showSelectedReport() {
+        var report = selectedReport();
+        selectedDescription.setText(report == null ? "" : report.description());
         selectedDescription.setCaretPosition(0);
+        updateReportActions();
+    }
+
+    private void updateReportActions() {
+        var report = selectedReport();
+        boolean manageable = report != null && report.canManage();
+        boolean enabled = !reportBusy && manageable;
+        edit.setEnabled(enabled);
+        cancelReport.setEnabled(enabled);
     }
 
     public void onSignIn(Runnable action) {
@@ -188,6 +215,18 @@ public final class CampusFixView {
 
     public void onSubmitReport(Runnable action) {
         submit.addActionListener(event -> action.run());
+    }
+
+    public void onEditReport(Runnable action) {
+        edit.addActionListener(event -> action.run());
+    }
+
+    public void onCancelReport(Runnable action) {
+        cancelReport.addActionListener(event -> action.run());
+    }
+
+    public void onDiscardEdit(Runnable action) {
+        discardEdit.addActionListener(event -> action.run());
     }
 
     public void onClose(Runnable action) {
@@ -235,6 +274,7 @@ public final class CampusFixView {
     }
 
     public void showReportStatus(String message, boolean busy) {
+        reportBusy = busy;
         reportStatus.setText(message);
         refresh.setEnabled(!busy);
         submit.setEnabled(!busy);
@@ -242,6 +282,8 @@ public final class CampusFixView {
         reportLocation.setEnabled(!busy);
         reportDescription.setEnabled(!busy);
         reportCategory.setEnabled(!busy);
+        discardEdit.setEnabled(!busy);
+        updateReportActions();
     }
 
     public void showCategories(List<CategoryOption> categories) {
@@ -258,20 +300,55 @@ public final class CampusFixView {
     }
 
     public void showReports(List<ReportRow> rows) {
+        var previousSelection = selectedReport();
         reports.clearSelection();
         displayedReports = rows;
         reportTable.setRowCount(0);
+        int selectedIndex = 0;
         for (var row : rows) {
+            if (previousSelection != null && row.id() == previousSelection.id()) {
+                selectedIndex = reportTable.getRowCount();
+            }
             reportTable.addRow(new Object[]{
                     row.id(), row.title(), row.category(), row.location(), row.reporter(), row.status()
             });
         }
         if (!rows.isEmpty()) {
-            reports.setRowSelectionInterval(0, 0);
+            reports.setRowSelectionInterval(selectedIndex, selectedIndex);
         }
+        updateReportActions();
+    }
+
+    public void showReportForEditing(ReportRow report) {
+        String title = String.format("Edit report #%d", report.id());
+        reportForm.setBorder(BorderFactory.createTitledBorder(title));
+        submit.setText("Save changes");
+        discardEdit.setVisible(true);
+        reportTitle.setText(report.title());
+        reportLocation.setText(report.location());
+        reportDescription.setText(report.description());
+        reportCategory.setSelectedItem(null);
+        for (int index = 0; index < reportCategory.getItemCount(); index++) {
+            if (reportCategory.getItemAt(index).id() == report.categoryId()) {
+                reportCategory.setSelectedIndex(index);
+                break;
+            }
+        }
+        reportTitle.requestFocusInWindow();
+    }
+
+    public boolean confirmCancellation(long id) {
+        String message = String.format("Cancel report #%d?", id);
+        String[] options = {"Cancel report", "Keep report"};
+        int choice = JOptionPane.showOptionDialog(frame, message, "Cancel report",
+                JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[1]);
+        return choice == 0;
     }
 
     public void clearReportForm() {
+        reportForm.setBorder(BorderFactory.createTitledBorder("New maintenance report"));
+        submit.setText("Submit report");
+        discardEdit.setVisible(false);
         reportTitle.setText("");
         reportLocation.setText("");
         reportDescription.setText("");
@@ -296,6 +373,7 @@ public final class CampusFixView {
         accountName.setText(String.format("Signed in as %s", name));
         reportListTitle.setText(canSubmit ? "My reports" : "All reports");
         reportForm.setVisible(canSubmit);
+        reportActions.setVisible(canSubmit);
         layout.show(cards, "account");
         frame.getRootPane().setDefaultButton(canSubmit ? submit : null);
         frame.setSize(800, 620);

@@ -79,6 +79,38 @@ public final class IssueDao implements CrudDao<Issue> {
         }
     }
 
+    public boolean updateOpen(Issue issue) throws SQLException {
+        String sql = """
+                UPDATE issues
+                SET category_id = category.id, title = ?, description = ?, location = ?
+                FROM categories category
+                WHERE issues.id = ? AND issues.reporter_id = ?
+                  AND issues.status = 'OPEN'
+                  AND category.id = ? AND category.active
+                """;
+        try (var statement = database.getConnection().prepareStatement(sql)) {
+            statement.setString(1, issue.title());
+            statement.setString(2, issue.description());
+            statement.setString(3, issue.location());
+            statement.setLong(4, issue.id());
+            statement.setLong(5, issue.reporterId());
+            statement.setLong(6, issue.categoryId());
+            return statement.executeUpdate() == 1;
+        }
+    }
+
+    public boolean cancelOpen(long id, long reporterId) throws SQLException {
+        String sql = """
+                UPDATE issues SET status = 'CANCELLED'
+                WHERE id = ? AND reporter_id = ? AND status = 'OPEN'
+                """;
+        try (var statement = database.getConnection().prepareStatement(sql)) {
+            statement.setLong(1, id);
+            statement.setLong(2, reporterId);
+            return statement.executeUpdate() == 1;
+        }
+    }
+
     public List<Issue.Summary> findAll() throws SQLException {
         String sql = String.format("%s ORDER BY i.id DESC", REPORT_QUERY);
         try (var statement = database.getConnection().prepareStatement(sql)) {

@@ -26,6 +26,7 @@ public final class CampusFixController {
     private final CampusFixView view;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private User signedInUser;
+    private long editingReportId;
     private boolean closing;
 
     public CampusFixController(DatabaseConnection database, AuthenticationService authentication,
@@ -38,7 +39,10 @@ public final class CampusFixController {
         view.onCheck(this::checkConnection);
         view.onSignOut(this::signOut);
         view.onRefresh(this::refreshReports);
-        view.onSubmitReport(this::submitReport);
+        view.onSubmitReport(this::saveReport);
+        view.onEditReport(this::beginEdit);
+        view.onCancelReport(this::cancelReport);
+        view.onDiscardEdit(this::discardEdit);
         view.onClose(this::close);
     }
 
@@ -79,6 +83,7 @@ public final class CampusFixController {
 
     private void signOut() {
         signedInUser = null;
+        editingReportId = 0;
         view.showSignIn();
     }
 
@@ -94,7 +99,7 @@ public final class CampusFixController {
         view.showReportStatus(loadingMessage, true);
         worker.execute(() -> {
             try {
-                var rows = reports.list(user).stream().map(CampusFixController::reportRow).toList();
+                var rows = reports.list(user).stream().map(report -> reportRow(user, report)).toList();
                 List<CategoryOption> categories = user.role() == User.Role.REGULAR
                         ? reports.activeCategories().stream()
                                 .map(category -> new CategoryOption(category.id(), category.name())).toList()
@@ -115,38 +120,93 @@ public final class CampusFixController {
         });
     }
 
-    private void submitReport() {
+    private void beginEdit() {
+        var report = view.selectedReport();
+        if (report == null || !report.canManage()) {
+            return;
+        }
+        editingReportId = report.id();
+        view.showReportForEditing(report);
+    }
+
+    private void discardEdit() {
+        editingReportId = 0;
+        view.clearReportForm();
+    }
+
+    private void saveReport() {
         User user = signedInUser;
         if (user == null) {
             return;
         }
+        long reportId = editingReportId;
+        boolean editing = reportId != 0;
         long category = view.reportCategoryId();
         String title = view.reportTitle();
         String location = view.reportLocation();
         String description = view.reportDescription();
-        view.showReportStatus("Submitting report...", true);
+        view.showReportStatus(editing ? "Saving report..." : "Submitting report...", true);
 
         worker.execute(() -> {
             try {
-                reports.submit(user, category, title, description, location);
+                if (editing) {
+                    reports.edit(user, reportId, category, title, description, location);
+                } else {
+                    reports.submit(user, category, title, description, location);
+                }
                 updateAccount(user, () -> {
-                    view.clearReportForm();
-                    loadReports("Report submitted. Refreshing...", "Report submitted.",
-                            "Report submitted. Could not refresh reports.");
+                    discardEdit();
+                    refreshAfterChange(editing ? "Report updated." : "Report submitted.");
                 });
             } catch (IllegalArgumentException exception) {
                 updateAccount(user, () -> view.showReportStatus(exception.getMessage(), false));
             } catch (SQLException exception) {
-                LOGGER.log(Level.WARNING, "Submitting report failed.", exception);
-                updateAccount(user, () -> view.showReportStatus("Could not submit the report.", false));
+                LOGGER.log(Level.WARNING, "Saving the report failed.", exception);
+                updateAccount(user, () -> view.showReportStatus("Could not save the report.", false));
             }
         });
     }
 
-    private static ReportRow reportRow(Issue.Summary report) {
+    private void cancelReport() {
+        User user = signedInUser;
+        var report = view.selectedReport();
+        if (user == null || report == null) {
+            return;
+        }
+        if (!report.canManage() || !view.confirmCancellation(report.id())) {
+            return;
+        }
+
+        view.showReportStatus("Cancelling report...", true);
+        worker.execute(() -> {
+            try {
+                reports.cancel(user, report.id());
+                updateAccount(user, () -> {
+                    if (editingReportId == report.id()) {
+                        discardEdit();
+                    }
+                    refreshAfterChange("Report cancelled.");
+                });
+            } catch (IllegalArgumentException exception) {
+                updateAccount(user, () -> view.showReportStatus(exception.getMessage(), false));
+            } catch (SQLException exception) {
+                LOGGER.log(Level.WARNING, "Cancelling the report failed.", exception);
+                updateAccount(user, () -> view.showReportStatus("Could not cancel the report.", false));
+            }
+        });
+    }
+
+    private void refreshAfterChange(String message) {
+        loadReports(String.format("%s Refreshing...", message), message,
+                String.format("%s Could not refresh reports.", message));
+    }
+
+    private static ReportRow reportRow(User viewer, Issue.Summary report) {
         var issue = report.issue();
-        return new ReportRow(issue.id(), issue.title(), report.categoryName(), issue.location(),
-                report.reporterName(), issue.status().name(), issue.description());
+        boolean canManage = viewer.role() == User.Role.REGULAR && issue.status() == Issue.Status.OPEN;
+        return new ReportRow(issue.id(), issue.title(), issue.categoryId(), report.categoryName(),
+                issue.location(), report.reporterName(), issue.status().name(),
+                issue.description(), canManage);
     }
 
     private void updateAccount(User user, Runnable update) {

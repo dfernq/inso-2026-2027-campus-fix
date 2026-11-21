@@ -23,10 +23,25 @@ public final class IssueService {
 
     public Issue submit(User reporter, long categoryId, String title,
                         String description, String location) throws SQLException {
-        if (reporter.role() != User.Role.REGULAR) {
-            throw new IllegalArgumentException("Only regular users can submit reports.");
-        }
+        requireRegularUser(reporter);
         return issues.create(Issue.open(reporter.id(), categoryId, title, description, location));
+    }
+
+    public void edit(User reporter, long issueId, long categoryId, String title,
+                     String description, String location) throws SQLException {
+        requireRegularUser(reporter);
+        var issue = Issue.open(issueId, reporter.id(), categoryId, title, description, location);
+        if (!issues.updateOpen(issue)) {
+            throw new IllegalArgumentException(
+                    "Edit an open report you submitted and select an active category.");
+        }
+    }
+
+    public void cancel(User reporter, long issueId) throws SQLException {
+        requireRegularUser(reporter);
+        if (!issues.cancelOpen(issueId, reporter.id())) {
+            throw new IllegalArgumentException("Only your open reports can be cancelled.");
+        }
     }
 
     public List<Issue.Summary> list(User viewer) throws SQLException {
@@ -34,5 +49,11 @@ public final class IssueService {
             return issues.findAll();
         }
         return issues.findByReporter(viewer.id());
+    }
+
+    private static void requireRegularUser(User user) {
+        if (user.role() != User.Role.REGULAR) {
+            throw new IllegalArgumentException("Only regular users can submit, edit, or cancel reports.");
+        }
     }
 }

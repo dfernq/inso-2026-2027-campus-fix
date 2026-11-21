@@ -4,6 +4,7 @@ from enum import Enum
 
 class Status(Enum):
     OPEN = "OPEN"
+    CANCELLED = "CANCELLED"
 
 
 @dataclass(frozen=True)

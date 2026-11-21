@@ -3,7 +3,8 @@ package org.campusfix.model.domain;
 public record Issue(long id, long reporterId, long categoryId, String title,
                     String description, String location, Status status) {
     public enum Status {
-        OPEN
+        OPEN,
+        CANCELLED
     }
 
     public record Summary(Issue issue, String reporterName, String categoryName) {
@@ -11,10 +12,15 @@ public record Issue(long id, long reporterId, long categoryId, String title,
 
     public static Issue open(long reporterId, long categoryId, String title,
                              String description, String location) {
+        return open(0, reporterId, categoryId, title, description, location);
+    }
+
+    public static Issue open(long id, long reporterId, long categoryId, String title,
+                             String description, String location) {
         if (categoryId <= 0) {
             throw new IllegalArgumentException("Select a category.");
         }
-        return new Issue(0, reporterId, categoryId,
+        return new Issue(id, reporterId, categoryId,
                 requireText(title, "Title", 120),
                 requireText(description, "Description", 2000),
                 requireText(location, "Location", 120),
