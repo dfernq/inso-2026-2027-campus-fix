@@ -22,6 +22,7 @@ import org.campusfix.android.CampusFixApplication;
 import org.campusfix.android.R;
 import org.campusfix.android.viewmodel.CampusFixViewModel;
 import org.campusfix.android.viewmodel.CampusFixViewModel.AccountDisplay;
+import org.campusfix.android.viewmodel.CampusFixViewModel.CategoriesState;
 import org.campusfix.android.viewmodel.CampusFixViewModel.CategoryOption;
 import org.campusfix.android.viewmodel.CampusFixViewModel.ReportDisplay;
 import org.campusfix.android.viewmodel.CampusFixViewModel.ReportsState;
@@ -47,6 +48,9 @@ public final class MainActivity extends ComponentActivity {
     private Button checkConnection;
     private TextView status;
     private View accountPanel;
+    private View reportsPanel;
+    private CategoryPanel categoryPanel;
+    private Button switchSection;
     private TextView accountTitle;
     private TextView accountName;
     private TextView reportsTitle;
@@ -86,6 +90,8 @@ public final class MainActivity extends ComponentActivity {
         var application = (CampusFixApplication) getApplication();
         viewModel = new ViewModelProvider(this, application.viewModelFactory())
                 .get(CampusFixViewModel.class);
+        categoryPanel = new CategoryPanel(this, viewModel);
+        categoryPanel.restoreDraft(savedInstanceState);
         bindActions();
         viewModel.state().observe(this, this::render);
     }
@@ -99,6 +105,8 @@ public final class MainActivity extends ComponentActivity {
         checkConnection = findViewById(R.id.check_connection);
         status = findViewById(R.id.sign_in_status);
         accountPanel = findViewById(R.id.account_panel);
+        reportsPanel = findViewById(R.id.reports_panel);
+        switchSection = findViewById(R.id.switch_section);
         accountTitle = findViewById(R.id.account_title);
         accountName = findViewById(R.id.account_name);
         reportsTitle = findViewById(R.id.reports_title);
@@ -144,7 +152,12 @@ public final class MainActivity extends ComponentActivity {
             hideKeyboard(username);
             viewModel.signOut();
         });
-        refresh.setOnClickListener(view -> viewModel.refreshReports());
+        refresh.setOnClickListener(view -> viewModel.refresh());
+        switchSection.setOnClickListener(view -> {
+            hideKeyboard(view);
+            viewModel.switchSection();
+            screen.scrollTo(0, 0);
+        });
         submit.setOnClickListener(view -> {
             hideKeyboard(reportDescription);
             viewModel.saveReport(editingIssueId, selectedCategoryId(), reportTitle.getText().toString(),
@@ -174,7 +187,7 @@ public final class MainActivity extends ComponentActivity {
         });
     }
 
-    private void hideKeyboard(View view) {
+    void hideKeyboard(View view) {
         var insets = WindowCompat.getInsetsController(getWindow(), view);
         insets.hide(WindowInsetsCompat.Type.ime());
     }
@@ -189,11 +202,12 @@ public final class MainActivity extends ComponentActivity {
 
     private void render(State state) {
         if (state.account() != null) {
-            renderAccount(state.account(), state.reports());
+            renderAccount(state.account(), state.reports(), state.categories());
             return;
         }
 
         accountPanel.setVisibility(View.GONE);
+        categoryPanel.render(null);
         clearDraft();
         clearResolutionDraft();
         renderedSaveCount = 0;
@@ -209,10 +223,25 @@ public final class MainActivity extends ComponentActivity {
         signInForm.setVisibility(View.VISIBLE);
     }
 
-    private void renderAccount(AccountDisplay account, ReportsState reports) {
+    private void renderAccount(AccountDisplay account, ReportsState reports, CategoriesState categories) {
         signInForm.setVisibility(View.GONE);
         accountTitle.setText(account.title());
         accountName.setText(getString(R.string.signed_in_as, account.username()));
+        boolean managingCategories = categories != null;
+        boolean ready = managingCategories ? !categories.busy() : !reports.busy();
+        switchSection.setVisibility(account.canSubmit() ? View.GONE : View.VISIBLE);
+        switchSection.setText(managingCategories ? R.string.reports : R.string.categories);
+        switchSection.setEnabled(ready);
+        refresh.setEnabled(ready);
+        reportsPanel.setVisibility(managingCategories ? View.GONE : View.VISIBLE);
+        categoryPanel.render(categories);
+        if (!managingCategories) {
+            renderReports(account, reports);
+        }
+        accountPanel.setVisibility(View.VISIBLE);
+    }
+
+    private void renderReports(AccountDisplay account, ReportsState reports) {
         reportsTitle.setText(account.canSubmit() ? R.string.my_reports : R.string.all_reports);
         reportForm.setVisibility(account.canSubmit() ? View.VISIBLE : View.GONE);
 
@@ -242,8 +271,6 @@ public final class MainActivity extends ComponentActivity {
         reportCategory.setEnabled(ready);
         submit.setEnabled(ready);
         discardEdit.setEnabled(ready);
-        refresh.setEnabled(ready);
-        accountPanel.setVisibility(View.VISIBLE);
     }
 
     private void renderCategories(List<CategoryOption> categories) {
@@ -339,7 +366,7 @@ public final class MainActivity extends ComponentActivity {
             resolvingIssueId = issueId;
         }
         renderResolutionForm(true);
-        screen.smoothScrollTo(0, accountPanel.getTop() + resolutionForm.getTop());
+        screen.smoothScrollTo(0, accountPanel.getTop() + reportsPanel.getTop() + resolutionForm.getTop());
     }
 
     private void renderResolutionForm(boolean ready) {
@@ -366,7 +393,7 @@ public final class MainActivity extends ComponentActivity {
         reportDescription.setText(report.description());
         selectCategory(report.categoryId());
         renderDraftMode();
-        screen.smoothScrollTo(0, accountPanel.getTop() + reportForm.getTop());
+        screen.smoothScrollTo(0, accountPanel.getTop() + reportsPanel.getTop() + reportForm.getTop());
     }
 
     private void confirmCancellation(long issueId) {
@@ -418,6 +445,7 @@ public final class MainActivity extends ComponentActivity {
     @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
+        categoryPanel.saveDraft(outState);
         outState.putString(DRAFT_TITLE, reportTitle.getText().toString());
         outState.putString(DRAFT_LOCATION, reportLocation.getText().toString());
         outState.putString(DRAFT_DESCRIPTION, reportDescription.getText().toString());

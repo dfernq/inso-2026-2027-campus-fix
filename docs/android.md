@@ -2,7 +2,8 @@
 
 The Android client lets regular users submit maintenance reports and review
 their own reports. They can edit or cancel a report while it is open.
-Administrators can review reports from all users, start work, and record resolutions.
+Administrators can review reports from all users, start work, record resolutions,
+and manage report categories.
 
 ## Changesets
 
@@ -45,6 +46,16 @@ The note appears on the report for the reporter and administrators.
 status in the same database statement that advances it. Resolution saves
 the new status and note together.
 
+### Manage report categories
+
+Administrators open **Categories** to add a category, rename it, deactivate it,
+or reactivate it. The ViewModel publishes the current section, category list,
+and operation status. The Activity renders that state, and `CategoryService`
+checks permission and validates changes before the DAO writes them.
+
+Report forms offer active categories. Existing reports keep their category ID
+and display the current category name even after deactivation.
+
 ## Architecture
 
 ```mermaid
@@ -56,12 +67,16 @@ classDiagram
     CampusFixApplication ..> CampusFixViewModel : creates
     CampusFixApplication ..> DatabaseConnection : creates
     MainActivity ..> CampusFixViewModel : observes and calls
+    MainActivity *-- CategoryPanel : category editor
+    CategoryPanel ..> CampusFixViewModel : calls
     CampusFixViewModel --> DatabaseConnection : database
     CampusFixViewModel --> AuthenticationService : authentication
     CampusFixViewModel --> IssueService : reports
+    CampusFixViewModel --> CategoryService : categories
     AuthenticationService --> UserDao : users
     IssueService --> IssueDao : issues
     IssueService --> CategoryDao : categories
+    CategoryService --> CategoryDao : categories
     UserDao --> DatabaseConnection : database
     IssueDao --> DatabaseConnection : database
     CategoryDao --> DatabaseConnection : database
@@ -71,17 +86,18 @@ classDiagram
 ```
 
 - **View.** `MainActivity` reads the forms, forwards actions, and renders the
-  ViewModel's state. It preserves unfinished report edits and resolution notes
-  with their report IDs across rotation and clears them after the operation
-  succeeds or the user signs out. `ViewModelProvider` supplies the ViewModel
-  through the application factory.
-- **ViewModel.** `CampusFixViewModel` owns the account, reports, category options,
-  and operation status. Its `state()` method exposes `LiveData<State>` for the
-  Activity to observe. Updates go through a private `MutableLiveData`. The same
+  ViewModel's state. It preserves unfinished report edits, resolution notes,
+  and category drafts with their IDs across rotation. A successful save or
+  sign-out clears the corresponding draft. `ViewModelProvider` supplies the
+  ViewModel through the application factory.
+- **ViewModel.** `CampusFixViewModel` owns the account, reports, category lists,
+  current section, and operation status. Its `state()` method exposes
+  `LiveData<State>` for the Activity to observe. Updates go through a private `MutableLiveData`. The same
   ViewModel serves the recreated Activity after rotation. One worker runs
   database operations and closes the connection when the ViewModel is cleared.
 - **Model.** `AuthenticationService` verifies credentials, and `IssueService`
-  validates report changes and selects reports by role. The DAOs implement
+  validates report changes and selects reports by role. `CategoryService`
+  restricts category management to administrators. The DAOs implement
   `CrudDao` with parameterized JDBC queries. `DatabaseConnection` opens and
   reuses an autocommit connection.
 
@@ -119,8 +135,8 @@ If you have several emulator profiles, start the one you want first or set
 
 Each run starts or reuses PostgreSQL and applies the migrations through
 `database/005-report-resolution.sql`.
-The scripts preserve existing accounts and reports. The launcher installs the
-app, forwards the database port, and replaces the app's private connection
+The scripts preserve existing accounts, reports, and categories. The launcher
+installs the app, forwards the database port, and replaces the app's private connection
 settings before opening it. A failed step returns you to your terminal.
 Emulator startup output goes to `android/build/emulator.log`.
 
@@ -130,7 +146,9 @@ Emulator startup output goes to `android/build/emulator.log`.
 | `bob` | `bob-demo` | Regular |
 | `admin` | `admin-demo` | Administrator |
 
-These sample accounts are for local development databases.
+These sample accounts are for local development databases. As `admin`, tap
+**Categories** to open the editor and **Reports** to return to the report list.
+**Refresh** reloads the current list.
 
 ## Verification
 
@@ -145,6 +163,11 @@ Submit another report as `alice`, then sign in as `admin` and tap **Start work**
 Open **Resolve report**, enter a note, and rotate the device to verify that
 the note and report ID survive. Save the note and sign back in as the reporter
 to confirm the report shows `RESOLVED` and displays the note.
+
+As `admin`, add a category and rename one that has a report. Deactivate that
+category and check the existing report still displays its new name. As `alice`,
+check the category picker omits it. Reactivate it as `admin`, then sign in as
+`alice` again to verify it is available for new reports.
 
 The debug build keeps credentials out of the APK and Git. Use this client with
 a trusted local development database. An established connection is not recovered

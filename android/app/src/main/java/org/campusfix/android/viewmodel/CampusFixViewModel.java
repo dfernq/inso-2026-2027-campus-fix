@@ -22,6 +22,7 @@ import org.campusfix.model.persistence.CategoryDao;
 import org.campusfix.model.persistence.DatabaseConnection;
 import org.campusfix.model.persistence.IssueDao;
 import org.campusfix.model.persistence.UserDao;
+import org.campusfix.model.reports.CategoryService;
 import org.campusfix.model.reports.IssueService;
 
 public final class CampusFixViewModel extends ViewModel {
@@ -94,10 +95,26 @@ public final class CampusFixViewModel extends ViewModel {
         }
     }
 
-    public record State(Status signInStatus, AccountDisplay account, ReportsState reports) {
-        private State(Status signInStatus) {
-            this(signInStatus, null, null);
+    public record CategoryDisplay(long id, String name, boolean active) {
+    }
+
+    public record CategoriesState(List<CategoryDisplay> items, int message, String validationMessage,
+                                  boolean busy, long savedNameCount) {
+        private CategoriesState withStatus(int message, boolean busy) {
+            return new CategoriesState(items, message, null, busy, savedNameCount);
         }
+    }
+
+    public record State(Status signInStatus, AccountDisplay account, ReportsState reports,
+                        CategoriesState categories) {
+        private State(Status signInStatus) {
+            this(signInStatus, null, null, null);
+        }
+    }
+
+    @FunctionalInterface
+    private interface CategoryChange {
+        void apply(User administrator) throws SQLException;
     }
 
     private final Supplier<DatabaseConnection> createDatabase;
@@ -108,6 +125,7 @@ public final class CampusFixViewModel extends ViewModel {
     private DatabaseConnection database;
     private AuthenticationService authentication;
     private IssueService issues;
+    private CategoryService categories;
     private User signedInUser;
 
     public CampusFixViewModel(Supplier<DatabaseConnection> createDatabase) {
@@ -175,13 +193,126 @@ public final class CampusFixViewModel extends ViewModel {
         var account = new AccountDisplay(user.username(), title, regular);
         var initialReports = new ReportsState(List.of(), List.of(),
                 R.string.reports_loading, null, true, 0, 0, 0);
-        state.setValue(new State(Status.READY, account, initialReports));
+        state.setValue(new State(Status.READY, account, initialReports, null));
         loadReports(user, initialReports);
     }
 
-    public void refreshReports() {
-        var reports = state.getValue().reports();
-        if (reports == null || reports.busy()) {
+    public void switchSection() {
+        var current = state.getValue();
+        var user = signedInUser;
+        if (user == null || user.role() != User.Role.ADMIN) {
+            return;
+        }
+        var categoryPanel = current.categories();
+        if (categoryPanel == null) {
+            if (!current.reports().busy()) {
+                loadCategories(user, new CategoriesState(List.of(), 0, null, false, 0));
+            }
+        } else if (!categoryPanel.busy()) {
+            showReports(current.reports().withStatus(R.string.reports_loading, true));
+            loadReports(user, current.reports());
+        }
+    }
+
+    public void refresh() {
+        var categoryPanel = state.getValue().categories();
+        if (categoryPanel == null) {
+            refreshReports();
+        } else if (!categoryPanel.busy()) {
+            loadCategories(signedInUser, categoryPanel);
+        }
+    }
+
+    public void saveCategory(long categoryId, String name) {
+        if (categoryId == 0) {
+            changeCategory(user -> categories().create(user, name), R.string.category_added, true);
+        } else {
+            changeCategory(user -> categories().rename(user, categoryId, name), R.string.category_renamed, true);
+        }
+    }
+
+    public void setCategoryActive(long categoryId, boolean active) {
+        int message = active ? R.string.category_reactivated : R.string.category_deactivated;
+        changeCategory(user -> categories().setActive(user, categoryId, active), message, false);
+    }
+
+    private void loadCategories(User administrator, CategoriesState previous) {
+        showCategories(previous.withStatus(R.string.categories_loading, true));
+        worker.execute(() -> publishCategories(administrator, readCategories(administrator, previous, 0)));
+    }
+
+    private void changeCategory(CategoryChange change, int successMessage, boolean nameSaved) {
+        var previous = state.getValue().categories();
+        if (previous == null || previous.busy()) {
+            return;
+        }
+
+        var administrator = signedInUser;
+        showCategories(previous.withStatus(R.string.category_saving, true));
+        worker.execute(() -> {
+            try {
+                change.apply(administrator);
+            } catch (IllegalArgumentException exception) {
+                publishCategories(administrator, new CategoriesState(previous.items(), 0,
+                        exception.getMessage(), false, previous.savedNameCount()));
+                return;
+            } catch (SQLException exception) {
+                Log.w(TAG, "Saving the category failed.", exception);
+                publishCategories(administrator, previous.withStatus(R.string.category_save_failed, false));
+                return;
+            }
+
+            long savedNameCount = previous.savedNameCount();
+            if (nameSaved) {
+                savedNameCount++;
+            }
+            var saved = new CategoriesState(previous.items(), successMessage, null, true, savedNameCount);
+            publishCategories(administrator, readCategories(administrator, saved, successMessage));
+        });
+    }
+
+    private CategoriesState readCategories(User administrator, CategoriesState previous, int successMessage) {
+        try {
+            var rows = new ArrayList<CategoryDisplay>();
+            for (var category : categories().list(administrator)) {
+                rows.add(new CategoryDisplay(category.id(), category.name(), category.active()));
+            }
+            int message = rows.isEmpty() ? R.string.categories_empty : R.string.categories_loaded;
+            if (successMessage != 0) {
+                message = successMessage;
+            }
+            return new CategoriesState(List.copyOf(rows), message, null, false, previous.savedNameCount());
+        } catch (SQLException exception) {
+            Log.w(TAG, "Loading categories failed.", exception);
+            int message = successMessage == 0 ? R.string.categories_load_failed : R.string.category_saved_refresh_failed;
+            return previous.withStatus(message, false);
+        }
+    }
+
+    private void publishCategories(User administrator, CategoriesState categories) {
+        mainThread.post(() -> {
+            if (signedInUser == administrator) {
+                showCategories(categories);
+            }
+        });
+    }
+
+    private void showCategories(CategoriesState categories) {
+        var current = state.getValue();
+        state.setValue(new State(Status.READY, current.account(), current.reports(), categories));
+    }
+
+    private ReportsState availableReports() {
+        var current = state.getValue();
+        if (current.categories() != null || current.reports() == null) {
+            return null;
+        }
+        return current.reports().busy() ? null : current.reports();
+    }
+
+    private void refreshReports() {
+        var reports = availableReports();
+        if (reports == null) {
             return;
         }
         showReports(reports.withStatus(R.string.reports_loading, true));
@@ -189,8 +320,8 @@ public final class CampusFixViewModel extends ViewModel {
     }
 
     public void saveReport(long issueId, long categoryId, String title, String description, String location) {
-        var reports = state.getValue().reports();
-        if (reports == null || reports.busy()) {
+        var reports = availableReports();
+        if (reports == null) {
             return;
         }
 
@@ -219,8 +350,8 @@ public final class CampusFixViewModel extends ViewModel {
     }
 
     public void cancelReport(long issueId) {
-        var reports = state.getValue().reports();
-        if (reports == null || reports.busy()) {
+        var reports = availableReports();
+        if (reports == null) {
             return;
         }
 
@@ -250,8 +381,8 @@ public final class CampusFixViewModel extends ViewModel {
     }
 
     private void advanceReport(long issueId, Issue.Status targetStatus, String note) {
-        var reports = state.getValue().reports();
-        if (reports == null || reports.busy()) {
+        var reports = availableReports();
+        if (reports == null) {
             return;
         }
 
@@ -330,7 +461,7 @@ public final class CampusFixViewModel extends ViewModel {
     }
 
     private void showReports(ReportsState reports) {
-        state.setValue(new State(Status.READY, state.getValue().account(), reports));
+        state.setValue(new State(Status.READY, state.getValue().account(), reports, null));
     }
 
     private Status checkDatabase() {
@@ -364,6 +495,13 @@ public final class CampusFixViewModel extends ViewModel {
             issues = new IssueService(new IssueDao(connection), new CategoryDao(connection));
         }
         return issues;
+    }
+
+    private CategoryService categories() {
+        if (categories == null) {
+            categories = new CategoryService(new CategoryDao(database()));
+        }
+        return categories;
     }
 
     @Override

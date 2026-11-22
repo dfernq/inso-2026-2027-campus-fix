@@ -91,6 +91,15 @@
                     android:text="@string/refresh_reports" />
 
                 <Button
+                    android:id="@+id/switch_section"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="@string/categories"
+                    android:visibility="gone" />
+
+                <Button
                     android:id="@+id/sign_out"
                     style="?android:attr/buttonBarButtonStyle"
                     android:layout_width="wrap_content"
@@ -99,156 +108,165 @@
                     android:text="@string/sign_out" />
             </LinearLayout>
 
+            <include layout="@layout/category_panel" />
+
             <LinearLayout
-                android:id="@+id/report_form"
+                android:id="@+id/reports_panel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:orientation="vertical"
-                android:visibility="gone">
-
-                <TextView
-                    android:id="@+id/report_form_heading"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:accessibilityHeading="true"
-                    android:text="@string/new_report"
-                    android:textAppearance="?android:attr/textAppearanceMedium" />
-
-                <EditText
-                    android:id="@+id/report_title"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:hint="@string/report_title"
-                    android:importantForAutofill="no"
-                    android:imeOptions="actionNext"
-                    android:inputType="textCapSentences"
-                    android:saveEnabled="false" />
-
-                <EditText
-                    android:id="@+id/report_location"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:hint="@string/report_location"
-                    android:importantForAutofill="no"
-                    android:imeOptions="actionNext"
-                    android:inputType="textCapSentences"
-                    android:saveEnabled="false" />
-
-                <Spinner
-                    android:id="@+id/report_category"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:minHeight="48dp"
-                    android:saveEnabled="false" />
-
-                <EditText
-                    android:id="@+id/report_description"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="top"
-                    android:hint="@string/report_description"
-                    android:importantForAutofill="no"
-                    android:inputType="textCapSentences|textMultiLine"
-                    android:maxLines="5"
-                    android:minLines="2"
-                    android:saveEnabled="false" />
+                android:orientation="vertical">
 
                 <LinearLayout
-                    style="?android:attr/buttonBarStyle"
+                    android:id="@+id/report_form"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:orientation="horizontal">
+                    android:layout_marginTop="12dp"
+                    android:orientation="vertical"
+                    android:visibility="gone">
 
-                    <Button
-                        android:id="@+id/submit_report"
-                        style="?android:attr/buttonBarButtonStyle"
-                        android:layout_width="wrap_content"
+                    <TextView
+                        android:id="@+id/report_form_heading"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="@string/submit_report" />
+                        android:accessibilityHeading="true"
+                        android:text="@string/new_report"
+                        android:textAppearance="?android:attr/textAppearanceMedium" />
 
-                    <Button
-                        android:id="@+id/discard_edit"
-                        style="?android:attr/buttonBarButtonStyle"
-                        android:layout_width="wrap_content"
+                    <EditText
+                        android:id="@+id/report_title"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:text="@string/discard_report_edit"
-                        android:visibility="gone" />
+                        android:hint="@string/report_title"
+                        android:importantForAutofill="no"
+                        android:imeOptions="actionNext"
+                        android:inputType="textCapSentences"
+                        android:saveEnabled="false" />
+
+                    <EditText
+                        android:id="@+id/report_location"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="@string/report_location"
+                        android:importantForAutofill="no"
+                        android:imeOptions="actionNext"
+                        android:inputType="textCapSentences"
+                        android:saveEnabled="false" />
+
+                    <Spinner
+                        android:id="@+id/report_category"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:saveEnabled="false" />
+
+                    <EditText
+                        android:id="@+id/report_description"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="top"
+                        android:hint="@string/report_description"
+                        android:importantForAutofill="no"
+                        android:inputType="textCapSentences|textMultiLine"
+                        android:maxLines="5"
+                        android:minLines="2"
+                        android:saveEnabled="false" />
+
+                    <LinearLayout
+                        style="?android:attr/buttonBarStyle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/submit_report"
+                            style="?android:attr/buttonBarButtonStyle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/submit_report" />
+
+                        <Button
+                            android:id="@+id/discard_edit"
+                            style="?android:attr/buttonBarButtonStyle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:text="@string/discard_report_edit"
+                            android:visibility="gone" />
+                    </LinearLayout>
                 </LinearLayout>
-            </LinearLayout>
 
-            <LinearLayout
-                android:id="@+id/resolution_form"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:orientation="vertical"
-                android:visibility="gone">
+                <LinearLayout
+                    android:id="@+id/resolution_form"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:id="@+id/resolution_heading"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:accessibilityHeading="true"
+                        android:textAppearance="?android:attr/textAppearanceMedium" />
+
+                    <EditText
+                        android:id="@+id/resolution_note"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="top"
+                        android:hint="@string/resolution_note"
+                        android:importantForAutofill="no"
+                        android:inputType="textCapSentences|textMultiLine"
+                        android:maxLines="5"
+                        android:minLines="2"
+                        android:saveEnabled="false" />
+
+                    <LinearLayout
+                        style="?android:attr/buttonBarStyle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/resolve_report"
+                            style="?android:attr/buttonBarButtonStyle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/resolve_report" />
+
+                        <Button
+                            android:id="@+id/discard_resolution"
+                            style="?android:attr/buttonBarButtonStyle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:text="@string/discard_resolution" />
+                    </LinearLayout>
+                </LinearLayout>
 
                 <TextView
-                    android:id="@+id/resolution_heading"
+                    android:id="@+id/report_status"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:accessibilityLiveRegion="polite" />
+
+                <TextView
+                    android:id="@+id/reports_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
                     android:accessibilityHeading="true"
                     android:textAppearance="?android:attr/textAppearanceMedium" />
 
-                <EditText
-                    android:id="@+id/resolution_note"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="top"
-                    android:hint="@string/resolution_note"
-                    android:importantForAutofill="no"
-                    android:inputType="textCapSentences|textMultiLine"
-                    android:maxLines="5"
-                    android:minLines="2"
-                    android:saveEnabled="false" />
-
                 <LinearLayout
-                    style="?android:attr/buttonBarStyle"
+                    android:id="@+id/report_list"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-
-                    <Button
-                        android:id="@+id/resolve_report"
-                        style="?android:attr/buttonBarButtonStyle"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/resolve_report" />
-
-                    <Button
-                        android:id="@+id/discard_resolution"
-                        style="?android:attr/buttonBarButtonStyle"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:text="@string/discard_resolution" />
-                </LinearLayout>
+                    android:orientation="vertical" />
             </LinearLayout>
-
-            <TextView
-                android:id="@+id/report_status"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:accessibilityLiveRegion="polite" />
-
-            <TextView
-                android:id="@+id/reports_title"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:accessibilityHeading="true"
-                android:textAppearance="?android:attr/textAppearanceMedium" />
-
-            <LinearLayout
-                android:id="@+id/report_list"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical" />
         </LinearLayout>
     </FrameLayout>
 </ScrollView>

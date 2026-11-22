@@ -65,4 +65,27 @@
     <string name="report_resolved">Report resolved.</string>
     <string name="report_resolve_failed">Could not resolve the report.</string>
     <string name="report_resolved_refresh_failed">Report resolved. Could not refresh reports.</string>
+    <string name="categories">Categories</string>
+    <string name="reports">Reports</string>
+    <string name="new_category">New category</string>
+    <string name="category_name">Category name</string>
+    <string name="add_category">Add category</string>
+    <string name="rename_category">Rename</string>
+    <string name="rename_category_heading">Rename category</string>
+    <string name="save_category_changes">Save name</string>
+    <string name="deactivate_category">Deactivate</string>
+    <string name="reactivate_category">Reactivate</string>
+    <string name="category_active">Active</string>
+    <string name="category_inactive">Inactive</string>
+    <string name="categories_loading">Loading categories…</string>
+    <string name="categories_loaded">Categories up to date.</string>
+    <string name="categories_empty">No categories yet.</string>
+    <string name="categories_load_failed">Could not load categories. Try Refresh.</string>
+    <string name="category_saving">Saving category…</string>
+    <string name="category_save_failed">Could not save the category.</string>
+    <string name="category_saved_refresh_failed">Category saved. Could not refresh categories.</string>
+    <string name="category_added">Category added.</string>
+    <string name="category_renamed">Category renamed.</string>
+    <string name="category_deactivated">Category deactivated.</string>
+    <string name="category_reactivated">Category reactivated.</string>
 </resources>
