@@ -20,6 +20,7 @@ from campusfix.view.category_panel import CategoryRow
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
+ReportCommand = Callable[[], object]
 
 
 class CampusFixController:
@@ -302,23 +303,22 @@ class CampusFixController:
         location = self._view.report_location()
 
         if issue_id is None:
-            self._view.show_report_status("Submitting report...", busy=True)
-            result = self._worker.submit(
-                self._reports.submit, user, category_id, title, description, location
-            )
-            message = "Report submitted."
+            command = partial(self._reports.submit, user, category_id, title, description, location)
+            progress = "Submitting report..."
+            success = "Report submitted."
         else:
-            self._view.show_report_status("Saving report...", busy=True)
-            result = self._worker.submit(
+            command = partial(
                 self._reports.edit, user, issue_id, category_id, title, description, location
             )
-            message = "Report updated."
+            progress = "Saving report..."
+            success = "Report updated."
 
-        self._when_ready(
-            result,
-            lambda completed: self._complete_report_change(
-                completed, message, "Could not save the report.", on_success=self._discard_edit
-            ),
+        self._execute_report_command(
+            command,
+            progress_message=progress,
+            success_message=success,
+            failure_message="Could not save the report.",
+            on_success=self._discard_edit,
         )
 
     def _cancel_report(self) -> None:
@@ -329,17 +329,13 @@ class CampusFixController:
         if not report.can_manage or not self._view.confirm_cancellation(report.id):
             return
 
-        self._view.show_report_status("Cancelling report...", busy=True)
-        result = self._worker.submit(self._reports.cancel, user, report.id)
         on_success = self._discard_edit if self._editing_report_id == report.id else None
-        self._when_ready(
-            result,
-            lambda completed: self._complete_report_change(
-                completed,
-                "Report cancelled.",
-                "Could not cancel the report.",
-                on_success=on_success,
-            ),
+        self._execute_report_command(
+            partial(self._reports.cancel, user, report.id),
+            progress_message="Cancelling report...",
+            success_message="Report cancelled.",
+            failure_message="Could not cancel the report.",
+            on_success=on_success,
         )
 
     def _advance_report(self, target_status: Status) -> None:
@@ -354,28 +350,45 @@ class CampusFixController:
 
         if resolving:
             note = self._view.resolution_note()
-            self._view.show_report_status("Resolving report...", busy=True)
-            result = self._worker.submit(self._reports.resolve, user, report.id, note)
-            message = "Report resolved."
-            failure = "Could not resolve the report."
-            on_success = partial(self._view.clear_resolution_note, report.id)
+            self._execute_report_command(
+                partial(self._reports.resolve, user, report.id, note),
+                progress_message="Resolving report...",
+                success_message="Report resolved.",
+                failure_message="Could not resolve the report.",
+                on_success=partial(self._view.clear_resolution_note, report.id),
+            )
         else:
-            self._view.show_report_status("Starting work...", busy=True)
-            result = self._worker.submit(self._reports.start_work, user, report.id)
-            message = "Work started."
-            failure = "Could not start work."
-            on_success = None
+            self._execute_report_command(
+                partial(self._reports.start_work, user, report.id),
+                progress_message="Starting work...",
+                success_message="Work started.",
+                failure_message="Could not start work.",
+            )
 
+    def _execute_report_command(
+        self,
+        command: ReportCommand,
+        *,
+        progress_message: str,
+        success_message: str,
+        failure_message: str,
+        on_success: Callable[[], None] | None = None,
+    ) -> None:
+        self._view.show_report_status(progress_message, busy=True)
+        result = self._worker.submit(command)
         self._when_ready(
             result,
-            lambda completed: self._complete_report_change(
-                completed, message, failure, on_success=on_success
+            partial(
+                self._complete_report_change,
+                message=success_message,
+                failure_message=failure_message,
+                on_success=on_success,
             ),
         )
 
     def _complete_report_change(
         self,
-        result: Future[T],
+        result: Future[object],
         message: str,
         failure_message: str,
         *,

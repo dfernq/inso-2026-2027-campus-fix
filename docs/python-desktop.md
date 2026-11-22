@@ -80,6 +80,24 @@ tests can still supply their own manager configured for `campusfix_test`.
 packages, starts PostgreSQL, applies the application migrations, and opens the
 Tkinter client.
 
+### Run report changes using Command
+
+The Controller uses `functools.partial` to bind the arguments to each report
+operation before sending it to the database worker. For **Resolve report**,
+the resulting `ReportCommand` holds the signed-in user, report ID, and note
+read on the Tkinter event thread. The worker later calls `IssueService`
+with those captured values, and the Model applies the report rules.
+
+Submission, editing, cancellation, starting work, and resolution share the
+same execution path in `_execute_report_command`. The Controller shows
+progress, queues the command, and handles errors or refreshes the report list
+when it completes. Each action supplies its own messages and any cleanup it
+needs. Resolution clears the draft note after a successful write, so a
+validation error leaves the note available to edit.
+
+A change to scheduling or error handling now applies across all five actions.
+Signing out cancels any pending UI callback for the previous session.
+
 ## Architecture
 
 ```mermaid
