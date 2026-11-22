@@ -13,6 +13,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 import org.campusfix.android.R;
 import org.campusfix.model.auth.AuthenticationService;
 import org.campusfix.model.domain.Issue;
@@ -109,6 +110,11 @@ public final class CampusFixViewModel extends ViewModel {
         private State(Status signInStatus) {
             this(signInStatus, null, null, null);
         }
+    }
+
+    @FunctionalInterface
+    private interface ReportCommand {
+        void execute(User user) throws SQLException;
     }
 
     @FunctionalInterface
@@ -321,95 +327,58 @@ public final class CampusFixViewModel extends ViewModel {
     }
 
     public void saveReport(long issueId, long categoryId, String title, String description, String location) {
-        var reports = availableReports();
-        if (reports == null) {
-            return;
+        if (issueId == 0) {
+            executeReportCommand(user -> issues().submit(user, categoryId, title, description, location),
+                    R.string.report_submitting, R.string.report_submitted,
+                    R.string.report_save_failed, R.string.report_submitted_refresh_failed, ReportsState::afterSave);
+        } else {
+            executeReportCommand(user -> issues().edit(user, issueId, categoryId, title, description, location),
+                    R.string.report_saving, R.string.report_updated,
+                    R.string.report_save_failed, R.string.report_updated_refresh_failed, ReportsState::afterSave);
         }
-
-        var reporter = signedInUser;
-        boolean editing = issueId != 0;
-        int progressMessage = editing ? R.string.report_saving : R.string.report_submitting;
-        showReports(reports.withStatus(progressMessage, true));
-        worker.execute(() -> {
-            try {
-                if (editing) {
-                    issues().edit(reporter, issueId, categoryId, title, description, location);
-                } else {
-                    issues().submit(reporter, categoryId, title, description, location);
-                }
-                int success = editing ? R.string.report_updated : R.string.report_submitted;
-                int refreshFailure = editing
-                        ? R.string.report_updated_refresh_failed : R.string.report_submitted_refresh_failed;
-                publishReports(reporter, readReports(reporter, reports.afterSave(), success, refreshFailure));
-            } catch (IllegalArgumentException exception) {
-                publishReports(reporter, reports.withValidationMessage(exception.getMessage()));
-            } catch (SQLException exception) {
-                Log.w(TAG, "Saving the report failed.", exception);
-                publishReports(reporter, reports.withStatus(R.string.report_save_failed, false));
-            }
-        });
     }
 
     public void cancelReport(long issueId) {
-        var reports = availableReports();
-        if (reports == null) {
-            return;
-        }
-
-        var reporter = signedInUser;
-        showReports(reports.withStatus(R.string.report_cancelling, true));
-        worker.execute(() -> {
-            try {
-                issues().cancel(reporter, issueId);
-                var cancelled = reports.afterCancellation(issueId);
-                publishReports(reporter, readReports(reporter, cancelled,
-                        R.string.report_cancelled, R.string.report_cancelled_refresh_failed));
-            } catch (IllegalArgumentException exception) {
-                publishReports(reporter, reports.withValidationMessage(exception.getMessage()));
-            } catch (SQLException exception) {
-                Log.w(TAG, "Cancelling the report failed.", exception);
-                publishReports(reporter, reports.withStatus(R.string.report_cancel_failed, false));
-            }
-        });
+        executeReportCommand(user -> issues().cancel(user, issueId),
+                R.string.report_cancelling, R.string.report_cancelled,
+                R.string.report_cancel_failed, R.string.report_cancelled_refresh_failed,
+                reports -> reports.afterCancellation(issueId));
     }
 
     public void startWork(long issueId) {
-        advanceReport(issueId, Issue.Status.IN_PROGRESS, null);
+        executeReportCommand(user -> issues().startWork(user, issueId),
+                R.string.report_starting_work, R.string.report_work_started,
+                R.string.report_start_work_failed, R.string.report_work_started_refresh_failed,
+                UnaryOperator.identity());
     }
 
     public void resolveReport(long issueId, String note) {
-        advanceReport(issueId, Issue.Status.RESOLVED, note);
+        executeReportCommand(user -> issues().resolve(user, issueId, note),
+                R.string.report_resolving, R.string.report_resolved,
+                R.string.report_resolve_failed, R.string.report_resolved_refresh_failed,
+                reports -> reports.afterResolution(issueId));
     }
 
-    private void advanceReport(long issueId, Issue.Status targetStatus, String note) {
+    private void executeReportCommand(ReportCommand command, int progressMessage, int successMessage,
+                                      int failureMessage, int refreshFailureMessage,
+                                      UnaryOperator<ReportsState> afterSuccess) {
         var reports = availableReports();
         if (reports == null) {
             return;
         }
 
-        var administrator = signedInUser;
-        boolean resolving = targetStatus == Issue.Status.RESOLVED;
-        int progressMessage = resolving ? R.string.report_resolving : R.string.report_starting_work;
+        var user = signedInUser;
         showReports(reports.withStatus(progressMessage, true));
         worker.execute(() -> {
             try {
-                var changed = reports;
-                if (resolving) {
-                    issues().resolve(administrator, issueId, note);
-                    changed = reports.afterResolution(issueId);
-                } else {
-                    issues().startWork(administrator, issueId);
-                }
-                int success = resolving ? R.string.report_resolved : R.string.report_work_started;
-                int refreshFailure = resolving
-                        ? R.string.report_resolved_refresh_failed : R.string.report_work_started_refresh_failed;
-                publishReports(administrator, readReports(administrator, changed, success, refreshFailure));
+                command.execute(user);
+                var changed = afterSuccess.apply(reports);
+                publishReports(user, readReports(user, changed, successMessage, refreshFailureMessage));
             } catch (IllegalArgumentException exception) {
-                publishReports(administrator, reports.withValidationMessage(exception.getMessage()));
+                publishReports(user, reports.withValidationMessage(exception.getMessage()));
             } catch (SQLException exception) {
-                Log.w(TAG, "Updating the report status failed.", exception);
-                int message = resolving ? R.string.report_resolve_failed : R.string.report_start_work_failed;
-                publishReports(administrator, reports.withStatus(message, false));
+                Log.w(TAG, "Updating the report failed.", exception);
+                publishReports(user, reports.withStatus(failureMessage, false));
             }
         });
     }

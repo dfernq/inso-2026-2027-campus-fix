@@ -69,6 +69,26 @@ manager. The first request loads the app's private `.env`. When a ViewModel
 is cleared, it queues connection cleanup on the same worker. The next
 database operation can reopen the connection through the same manager.
 
+### Run report changes using Command
+
+The ViewModel packages each report change as a `ReportCommand`. When an
+administrator taps **Resolve report**, the Activity sends the report ID and
+note to the ViewModel. The command holds those values, and the ViewModel
+captures the current user before queueing the command. The worker calls
+`IssueService.resolve` with that user and those values.
+
+Submission, editing, cancellation, starting work, and resolution use
+`executeReportCommand` for worker scheduling and error handling. Each
+action supplies its own messages and the state update to apply after a
+successful write. For example, resolution records the resolved report ID so
+the Activity knows which note draft to clear. A validation error leaves the
+draft available to edit.
+
+The ViewModel publishes the result through `LiveData` for the current
+sign-in session. It reports a successful write even if the list refresh
+fails. A change to scheduling or completion handling applies across all
+five actions.
+
 ## Architecture
 
 ```mermaid
