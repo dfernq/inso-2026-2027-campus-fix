@@ -105,12 +105,12 @@ The launcher reuses a connected device or starts the only configured emulator.
 If you have several emulator profiles, start the one you want first or set
 `campusfix.avd` to its name in `android/local.properties`.
 
-Each run starts or reuses PostgreSQL and applies the account, maintenance
-report, and cancellation migrations through `database/004-report-cancellation.sql`.
-The scripts preserve existing accounts and reports. The
-launcher installs the app, forwards the database port, and replaces the app's
-private connection settings before opening it. A failed step returns you to
-your terminal. Emulator startup output goes to `android/build/emulator.log`.
+Each run starts or reuses PostgreSQL and applies the migrations through
+`database/005-report-resolution.sql`.
+The scripts preserve existing accounts and reports. The launcher installs the
+app, forwards the database port, and replaces the app's private connection
+settings before opening it. A failed step returns you to your terminal.
+Emulator startup output goes to `android/build/emulator.log`.
 
 | Username | Password | Role |
 | --- | --- | --- |
