@@ -9,6 +9,7 @@ from campusfix.model.persistence.category_dao import CategoryDao
 from campusfix.model.persistence.database_connection import DatabaseConnection
 from campusfix.model.persistence.issue_dao import IssueDao
 from campusfix.model.persistence.user_dao import UserDao
+from campusfix.model.reports.category_service import CategoryService
 from campusfix.model.reports.issue_service import IssueService
 
 
@@ -29,8 +30,10 @@ def main() -> None:
 
     users = UserDao(database)
     authentication = AuthenticationService(users)
-    reports = IssueService(IssueDao(database), CategoryDao(database))
-    CampusFixController(database, authentication, reports).start()
+    category_dao = CategoryDao(database)
+    reports = IssueService(IssueDao(database), category_dao)
+    categories = CategoryService(category_dao)
+    CampusFixController(database, authentication, reports, categories).start()
 
 
 if __name__ == "__main__":

@@ -2,7 +2,8 @@
 
 The Tkinter client lets regular users submit maintenance reports and review
 their own reports. They can edit or cancel a report while it is open.
-Administrators can review reports from all users, start work, and record resolutions.
+Administrators can review reports from all users, start work, record resolutions,
+and manage report categories.
 
 ## Changesets
 
@@ -52,6 +53,14 @@ the note in the report details.
 update checks the report's current status in the same statement that writes
 the new status. Resolution saves the status and note together.
 
+### Manage report categories
+
+Administrators can add, rename, deactivate, and reactivate categories.
+`CategoryService` checks the administrator role and validates category names.
+`CategoryDao` updates the name or active flag by ID. Reports keep their original
+category ID and display the current name, including when the category is
+inactive. Report forms offer active categories.
+
 ## Architecture
 
 ```mermaid
@@ -66,14 +75,18 @@ classDiagram
     Main ..> UserDao : creates
     Main ..> IssueService : creates
     Main ..> IssueDao : creates
+    Main ..> CategoryService : creates
     Main ..> CategoryDao : creates
     CampusFixController --> CampusFixView : view
     CampusFixController --> DatabaseConnection : database
     CampusFixController --> AuthenticationService : authentication
     CampusFixController --> IssueService : reports
+    CampusFixController --> CategoryService : categories
+    CampusFixView *-- CategoryPanel : category editor
     AuthenticationService --> UserDao : users
     IssueService --> IssueDao : issues
     IssueService --> CategoryDao : categories
+    CategoryService --> CategoryDao : categories
     UserDao --> DatabaseConnection : database
     IssueDao --> DatabaseConnection : database
     CategoryDao --> DatabaseConnection : database
@@ -83,9 +96,9 @@ classDiagram
 ```
 
 The entry point creates a `DatabaseConnection` and passes it to the three DAOs.
-The Controller creates the View and binds callbacks for account actions, report
-actions, refresh, and the connection check. The View renders the forms and
-report list and forwards actions through those callbacks.
+The Controller creates the View and binds callbacks for account, report, and
+category actions, refresh, and the connection check. The View renders the
+forms and lists and forwards actions through those callbacks.
 
 The Controller runs database work on one worker and updates the View on the
 Tkinter event thread. The Model opens a connection on first use and reuses it in
@@ -118,9 +131,9 @@ docker compose exec -T database sh -c \
 ```
 
 `003-maintenance-reports.sql` creates the issue and category tables and seeds the
-initial categories. `004-report-cancellation.sql` allows reports to be marked
-`CANCELLED`. `005-report-resolution.sql` adds the two work statuses and the
-resolution note. The scripts are safe to rerun.
+initial categories when the category table is empty. `004-report-cancellation.sql`
+allows reports to be marked `CANCELLED`. `005-report-resolution.sql` adds the two
+work statuses and the resolution note. The scripts are safe to rerun.
 
 ```sh
 cd python
@@ -144,8 +157,11 @@ These sample accounts are for local development databases. Sign in as
 and choose **Edit report** to load it into the form, or choose **Cancel report**
 and confirm to mark it `CANCELLED`. Sign in as `admin` to see **All reports**.
 Select an open report and choose **Start work**. When the work is complete,
-enter a note and choose **Resolve report**. Use **Refresh** to load changes
-from another session.
+enter a note and choose **Resolve report**.
+
+As `admin`, open **Categories** to add a name or select a category to rename,
+deactivate, or reactivate. Use **Reports** to return to the report list.
+**Refresh** loads changes to the current list from other sessions.
 
 The connection uses `CAMPUSFIX_DB_URL`, `CAMPUSFIX_DB_USER`, and
 `CAMPUSFIX_DB_PASSWORD`. Process environment variables override file settings.
@@ -188,4 +204,4 @@ python -m unittest discover -s tests/integration
 The unit tests cover report validation, password checking, and database settings.
 The integration tests cover connection handling, account CRUD, sign-in, report
 visibility by role, active-category checks, and permissions for edits,
-cancellations, and administrator status changes.
+cancellations, administrator status changes, and category management.

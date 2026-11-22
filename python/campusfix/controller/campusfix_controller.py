@@ -8,11 +8,14 @@ from typing import TypeVar
 import psycopg
 
 from campusfix.model.auth.authentication_service import AuthenticationService
+from campusfix.model.domain.category import Category
 from campusfix.model.domain.issue import Status
 from campusfix.model.domain.user import Role, User
 from campusfix.model.persistence.database_connection import DatabaseConnection
+from campusfix.model.reports.category_service import CategoryService
 from campusfix.model.reports.issue_service import IssueService
 from campusfix.view.campusfix_view import CampusFixView, CategoryOption, ReportRow
+from campusfix.view.category_panel import CategoryRow
 
 
 logger = logging.getLogger(__name__)
@@ -25,20 +28,27 @@ class CampusFixController:
         database: DatabaseConnection,
         authentication: AuthenticationService,
         reports: IssueService,
+        categories: CategoryService,
     ) -> None:
         self._database = database
         self._authentication = authentication
         self._reports = reports
+        self._categories = categories
         self._window = Tk()
         self._view = CampusFixView(self._window)
         self._worker = ThreadPoolExecutor(max_workers=1)
         self._signed_in_user: User | None = None
         self._editing_report_id: int | None = None
+        self._managing_categories = False
         self._pending_callback: str | None = None
         self._view.on_sign_in(self._sign_in)
         self._view.on_check(self._check_connection)
         self._view.on_sign_out(self._sign_out)
-        self._view.on_refresh(self._load_reports)
+        self._view.on_refresh(self._refresh)
+        self._view.on_switch_section(self._switch_section)
+        self._view.category_panel.on_add(self._add_category)
+        self._view.category_panel.on_rename(self._rename_category)
+        self._view.category_panel.on_toggle_active(self._toggle_category_active)
         self._view.on_submit_report(self._save_report)
         self._view.on_edit_report(self._begin_edit)
         self._view.on_cancel_report(self._cancel_report)
@@ -84,7 +94,125 @@ class CampusFixController:
         self._cancel_pending_callback()
         self._signed_in_user = None
         self._editing_report_id = None
+        self._managing_categories = False
         self._view.show_sign_in()
+
+    def _switch_section(self) -> None:
+        user = self._signed_in_user
+        if user is None or user.role is not Role.ADMIN:
+            return
+
+        self._managing_categories = not self._managing_categories
+        self._view.show_category_section(self._managing_categories)
+        self._refresh()
+
+    def _refresh(self) -> None:
+        if self._managing_categories:
+            self._load_categories()
+        else:
+            self._load_reports()
+
+    def _load_categories(self, *, change_message: str | None = None) -> None:
+        user = self._signed_in_user
+        if user is None:
+            return
+        message = f"{change_message} Refreshing..." if change_message else "Loading categories..."
+        self._show_category_status(message, busy=True)
+        result = self._worker.submit(self._categories.list, user)
+        self._when_ready(
+            result,
+            lambda completed: self._complete_category_load(completed, change_message),
+        )
+
+    def _complete_category_load(
+        self, result: Future[list[Category]], change_message: str | None
+    ) -> None:
+        try:
+            categories = result.result()
+        except psycopg.Error:
+            logger.exception("Loading categories failed.")
+            message = (
+                f"{change_message} Could not refresh categories."
+                if change_message
+                else "Could not load categories. Try Refresh."
+            )
+        else:
+            rows = [
+                CategoryRow(category.id, category.name, category.active) for category in categories
+            ]
+            self._view.category_panel.show_rows(rows)
+            message = change_message or ("Categories up to date." if rows else "No categories yet.")
+        self._show_category_status(message, busy=False)
+
+    def _add_category(self) -> None:
+        user = self._signed_in_user
+        if user is None:
+            return
+        panel = self._view.category_panel
+        self._change_category(
+            partial(self._categories.create, user, panel.new_name()),
+            "Category added.",
+            on_success=panel.clear_new_name,
+        )
+
+    def _rename_category(self) -> None:
+        user = self._signed_in_user
+        panel = self._view.category_panel
+        category = panel.selected_category()
+        if user is None or category is None:
+            return
+        self._change_category(
+            partial(self._categories.rename, user, category.id, panel.selected_name()),
+            "Category renamed.",
+        )
+
+    def _toggle_category_active(self) -> None:
+        user = self._signed_in_user
+        category = self._view.category_panel.selected_category()
+        if user is None or category is None:
+            return
+        self._change_category(
+            partial(self._categories.set_active, user, category.id, not category.active),
+            "Category deactivated." if category.active else "Category reactivated.",
+        )
+
+    def _change_category(
+        self,
+        action: Callable[[], None],
+        message: str,
+        *,
+        on_success: Callable[[], None] | None = None,
+    ) -> None:
+        self._show_category_status("Saving category...", busy=True)
+        result = self._worker.submit(action)
+        self._when_ready(
+            result,
+            lambda completed: self._complete_category_change(completed, message, on_success),
+        )
+
+    def _complete_category_change(
+        self,
+        result: Future[None],
+        message: str,
+        on_success: Callable[[], None] | None,
+    ) -> None:
+        try:
+            result.result()
+        except ValueError as error:
+            self._show_category_status(str(error), busy=False)
+            return
+        except psycopg.Error:
+            logger.exception("Saving category failed.")
+            self._show_category_status("Could not save the category.", busy=False)
+            return
+
+        if on_success is not None:
+            on_success()
+        self._load_categories(change_message=message)
+
+    def _show_category_status(self, message: str, *, busy: bool) -> None:
+        self._view.set_navigation_busy(busy)
+        self._view.category_panel.show_status(message, busy=busy)
 
     def _load_reports(self, *, change_message: str | None = None) -> None:
         user = self._signed_in_user

@@ -2,6 +2,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from tkinter import Text, Tk, messagebox, ttk
 
+from campusfix.view.category_panel import CategoryPanel
+
 
 @dataclass(frozen=True)
 class CategoryOption:
@@ -74,17 +76,23 @@ class CampusFixView:
         self._refresh_button = ttk.Button(header, text="Refresh")
         self._refresh_button.pack(side="right", padx=(0, 8))
 
+        self._section_button = ttk.Button(header, text="Categories")
+        body = ttk.Frame(self._account_panel)
+        body.pack(fill="both", expand=True)
+        self._report_panel = ttk.Frame(body)
+        self.category_panel = CategoryPanel(body)
+
         self._create_report_list()
         self._create_report_form()
         self._create_resolution_form()
-        self._report_status = ttk.Label(self._account_panel)
+        self._report_status = ttk.Label(self._report_panel)
         self._report_status.pack(fill="x", pady=(8, 0))
 
     def _create_report_list(self) -> None:
-        self._report_list_title = ttk.Label(self._account_panel)
+        self._report_list_title = ttk.Label(self._report_panel)
         self._report_list_title.pack(anchor="w", pady=(0, 4))
 
-        table = ttk.Frame(self._account_panel)
+        table = ttk.Frame(self._report_panel)
         table.pack(fill="both", expand=True)
         table.columnconfigure(0, weight=1)
         table.rowconfigure(0, weight=1)
@@ -101,14 +109,14 @@ class CampusFixView:
         self._reports.configure(yscrollcommand=scrollbar.set)
         self._reports.bind("<<TreeviewSelect>>", lambda _event: self._show_selected_report())
 
-        details = ttk.LabelFrame(self._account_panel, text="Report description", padding=8)
+        details = ttk.LabelFrame(self._report_panel, text="Report description", padding=8)
         details.pack(fill="x", pady=(8, 0))
         self._selected_description = Text(
             details, height=3, wrap="word", state="disabled"
         )
         self._selected_description.pack(fill="x")
 
-        self._report_actions = ttk.Frame(self._account_panel)
+        self._report_actions = ttk.Frame(self._report_panel)
         self._edit_button = ttk.Button(self._report_actions, text="Edit report", state="disabled")
         self._edit_button.pack(side="left")
         self._cancel_report_button = ttk.Button(
@@ -116,7 +124,7 @@ class CampusFixView:
         )
         self._cancel_report_button.pack(side="left", padx=(8, 0))
 
-        self._admin_actions = ttk.Frame(self._account_panel)
+        self._admin_actions = ttk.Frame(self._report_panel)
         self._start_work_button = ttk.Button(
             self._admin_actions, text="Start work", state="disabled"
         )
@@ -124,7 +132,7 @@ class CampusFixView:
 
     def _create_report_form(self) -> None:
         self._report_form = ttk.LabelFrame(
-            self._account_panel, text="New maintenance report", padding=8
+            self._report_panel, text="New maintenance report", padding=8
         )
         self._report_form.columnconfigure(1, weight=1)
         self._report_title = ttk.Entry(self._report_form)
@@ -150,7 +158,7 @@ class CampusFixView:
 
     def _create_resolution_form(self) -> None:
         self._resolution_form = ttk.LabelFrame(
-            self._account_panel, text="Resolution note", padding=8
+            self._report_panel, text="Resolution note", padding=8
         )
         self._resolution_note = Text(self._resolution_form, height=3, wrap="word")
         self._resolution_note.pack(fill="x")
@@ -170,6 +178,9 @@ class CampusFixView:
 
     def on_refresh(self, action: Callable[[], None]) -> None:
         self._refresh_button.configure(command=action)
+
+    def on_switch_section(self, action: Callable[[], None]) -> None:
+        self._section_button.configure(command=action)
 
     def on_submit_report(self, action: Callable[[], None]) -> None:
         self._submit_button.configure(command=action)
@@ -235,7 +246,7 @@ class CampusFixView:
         self._report_busy = busy
         self._report_status.configure(text=message)
         state = "disabled" if busy else "normal"
-        self._refresh_button.configure(state=state)
+        self.set_navigation_busy(busy)
         self._submit_button.configure(state=state)
         self._report_title.configure(state=state)
         self._report_location.configure(state=state)
@@ -243,6 +254,21 @@ class CampusFixView:
         self._report_category.configure(state="disabled" if busy else "readonly")
         self._discard_edit_button.configure(state=state)
         self._update_report_actions()
+
+    def set_navigation_busy(self, busy: bool) -> None:
+        state = "disabled" if busy else "normal"
+        self._refresh_button.configure(state=state)
+        self._section_button.configure(state=state)
+
+    def show_category_section(self, visible: bool) -> None:
+        if visible:
+            self._report_panel.pack_forget()
+            self.category_panel.pack(fill="both", expand=True)
+            self._section_button.configure(text="Reports")
+        else:
+            self.category_panel.pack_forget()
+            self._report_panel.pack(fill="both", expand=True)
+            self._section_button.configure(text="Categories")
 
     def show_categories(self, categories: list[CategoryOption]) -> None:
         selected_id = self.report_category_id()
@@ -348,6 +374,9 @@ class CampusFixView:
         self._clear_resolution_draft()
         self.show_reports([])
         self.show_categories([])
+        self.category_panel.show_status("", busy=False)
+        self.category_panel.show_rows([])
+        self.category_panel.clear_new_name()
         self._sign_in_panel.pack(fill="both", expand=True)
         self._window.minsize(450, 190)
         self._window.geometry("450x190")
@@ -362,11 +391,14 @@ class CampusFixView:
         self._account_name.configure(text=f"Signed in as {username}")
         list_title = "My reports" if can_submit else "All reports"
         self._report_list_title.configure(text=list_title)
+        self.show_category_section(False)
         if can_submit:
+            self._section_button.pack_forget()
             self._admin_actions.pack_forget()
             self._report_actions.pack(fill="x", pady=(8, 0), before=self._report_status)
             self._report_form.pack(fill="x", pady=(8, 0), before=self._report_status)
         else:
+            self._section_button.pack(side="right", padx=(0, 8))
             self._report_actions.pack_forget()
             self._report_form.pack_forget()
             self._admin_actions.pack(fill="x", pady=(8, 0), before=self._report_status)
