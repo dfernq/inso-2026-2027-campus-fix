@@ -14,8 +14,9 @@ from campusfix.model.domain.user import Role, User
 from campusfix.model.persistence.database_connection import DatabaseConnection
 from campusfix.model.reports.category_service import CategoryService
 from campusfix.model.reports.issue_service import IssueService
-from campusfix.view.campusfix_view import CampusFixView, CategoryOption, ReportRow
+from campusfix.view.campusfix_view import CampusFixView, CategoryOption
 from campusfix.view.category_panel import CategoryRow
+from campusfix.view.report_table import ReportRow
 
 
 logger = logging.getLogger(__name__)

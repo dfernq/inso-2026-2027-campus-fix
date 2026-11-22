@@ -98,6 +98,18 @@ validation error leaves the note available to edit.
 A change to scheduling or error handling now applies across all five actions.
 Signing out cancels any pending UI callback for the previous session.
 
+### Adapt report rows for the Tkinter table
+
+`ReportTable` is a `ttk.Treeview` that accepts the `ReportRow` values supplied
+by the Controller. It adapts each record to the tuple of cells that Tkinter
+expects and uses the report ID as the widget's item ID.
+
+The same adapter translates a selected item back to its `ReportRow`, which
+the View uses for details and actions. Refresh restores the selected report
+by ID even if a newer report moves it down the list. The column definitions
+and row conversion live together in the View layer, so changes to column
+order and widths stay local to the adapter.
+
 ## Architecture
 
 ```mermaid
@@ -124,6 +136,7 @@ classDiagram
     CampusFixController --> IssueService : reports
     CampusFixController --> CategoryService : categories
     CampusFixView *-- CategoryPanel : category editor
+    CampusFixView *-- ReportTable : report table adapter
     AuthenticationService --> UserDao : users
     IssueService --> IssueDao : issues
     IssueService --> CategoryDao : categories

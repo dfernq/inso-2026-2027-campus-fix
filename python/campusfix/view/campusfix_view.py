@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from tkinter import Text, Tk, messagebox, ttk
 
 from campusfix.view.category_panel import CategoryPanel
+from campusfix.view.report_table import ReportRow, ReportTable
 
 
 @dataclass(frozen=True)
@@ -11,28 +12,11 @@ class CategoryOption:
     name: str
 
 
-@dataclass(frozen=True)
-class ReportRow:
-    id: int
-    title: str
-    category_id: int
-    category: str
-    location: str
-    reporter: str
-    status: str
-    description: str
-    resolution_note: str | None
-    can_manage: bool
-    can_start_work: bool
-    can_resolve: bool
-
-
 class CampusFixView:
     def __init__(self, window: Tk) -> None:
         self._window = window
         window.title("CampusFix")
         self._categories: list[CategoryOption] = []
-        self._displayed_reports: dict[str, ReportRow] = {}
         self._report_busy = False
         self._resolution_report_id: int | None = None
 
@@ -96,13 +80,7 @@ class CampusFixView:
         table.pack(fill="both", expand=True)
         table.columnconfigure(0, weight=1)
         table.rowconfigure(0, weight=1)
-        columns = ("ID", "Title", "Category", "Location", "Reporter", "Status")
-        self._reports = ttk.Treeview(
-            table, columns=columns, show="headings", selectmode="browse", height=6
-        )
-        for name, width in zip(columns, (45, 170, 110, 125, 90, 105)):
-            self._reports.heading(name, text=name)
-            self._reports.column(name, width=width, stretch=name == "Title")
+        self._reports = ReportTable(table)
         self._reports.grid(row=0, column=0, sticky="nsew")
         scrollbar = ttk.Scrollbar(table, orient="vertical", command=self._reports.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
@@ -282,25 +260,11 @@ class CampusFixView:
                 break
 
     def show_reports(self, rows: list[ReportRow]) -> None:
-        selection = self._reports.selection()
-        selected_id = selection[0] if selection else ""
-        self._reports.delete(*self._reports.get_children())
-        self._displayed_reports = {str(row.id): row for row in rows}
-        for row in rows:
-            values = (
-                row.id, row.title, row.category, row.location, row.reporter, row.status
-            )
-            self._reports.insert("", "end", iid=str(row.id), values=values)
-        if rows:
-            if selected_id not in self._displayed_reports:
-                selected_id = str(rows[0].id)
-            self._reports.selection_set(selected_id)
-            self._reports.see(selected_id)
+        self._reports.show_rows(rows)
         self._show_selected_report()
 
     def selected_report(self) -> ReportRow | None:
-        selection = self._reports.selection()
-        return self._displayed_reports.get(selection[0]) if selection else None
+        return self._reports.selected_report()
 
     def _show_selected_report(self) -> None:
         report = self.selected_report()
