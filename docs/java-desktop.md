@@ -2,7 +2,8 @@
 
 The Swing client lets regular users submit maintenance reports and review their
 own reports. They can edit or cancel a report while it is open. Administrators
-can review reports from all users, start work, and record resolutions.
+can review reports from all users, start work, record resolutions, and manage
+categories.
 
 ## Changesets
 
@@ -51,6 +52,17 @@ the note from the report list.
 update checks the report's current status in the same statement that writes
 the new status. Resolution saves the status and note together.
 
+### Manage report categories
+
+Administrators can list, add, rename, deactivate, and reactivate categories.
+The Model validates category names and rejects duplicates. Active categories
+are available in the report form. Existing reports keep their category when it
+is renamed or deactivated.
+
+The maintenance-report migration seeds the default categories only when the
+category table is empty. Rerunning the launcher preserves renames and inactive
+categories.
+
 ## Architecture
 
 The `java/model` module contains database access without a UI dependency.
@@ -68,15 +80,20 @@ classDiagram
     Main ..> AuthenticationService : creates
     Main ..> UserDao : creates
     Main ..> IssueService : creates
+    Main ..> CategoryService : creates
     Main ..> IssueDao : creates
     Main ..> CategoryDao : creates
     CampusFixController --> CampusFixView : view
+    CampusFixController --> CategoryPanel : category view
+    CampusFixView --> CategoryPanel : hosts
     CampusFixController --> DatabaseConnection : database
     CampusFixController --> AuthenticationService : authentication
     CampusFixController --> IssueService : reports
+    CampusFixController --> CategoryService : categories
     AuthenticationService --> UserDao : users
     IssueService --> IssueDao : issues
     IssueService --> CategoryDao : categories
+    CategoryService --> CategoryDao : categories
     UserDao --> DatabaseConnection : database
     IssueDao --> DatabaseConnection : database
     CategoryDao --> DatabaseConnection : database
@@ -86,9 +103,9 @@ classDiagram
 ```
 
 `Main` creates a `DatabaseConnection` and passes it to the three DAOs. The
-Controller creates its View and binds `Runnable` callbacks for sign-in, sign-out,
-connection checks, report actions, refresh, and window close. The View
-renders data from the Controller and forwards UI events through those callbacks.
+Controller creates the Views and binds `Runnable` callbacks for account,
+report, and category actions. The Views render data from the Controller and
+forward UI events through those callbacks.
 
 | Class | Responsibility |
 | --- | --- |
@@ -99,7 +116,9 @@ renders data from the Controller and forwards UI events through those callbacks.
 | `UserDao` | Implement account CRUD and username lookup with parameterized SQL. |
 | `IssueService` | Validate report changes, check permissions, and select the list for the signed-in role. |
 | `IssueDao` | Persist issues and query their reporter and category names. |
-| `CategoryDao` | Persist categories and look up active categories. |
+| `CategoryPanel` | Render the category list and forms for the administrator. |
+| `CategoryService` | Check the administrator role, validate names, and manage categories. |
+| `CategoryDao` | Persist categories and list all or active categories. |
 | `DatabaseConnection` | Open, reuse, check, and close the JDBC connection. |
 
 Account passwords are stored as a 16-byte salt and a 32-byte PBKDF2-HMAC-SHA256
@@ -183,6 +202,10 @@ resolution note and choose **Resolve report** when work is complete. Use
 **Refresh** to load changes made by another session. Closing the window shuts
 down the worker and connection.
 
+As an administrator, select **Categories** to manage the list. Choose a row
+to rename, deactivate, or reactivate that category. Select **Reports** to
+return to the report list.
+
 ## Configuration
 
 The application and integration tests read `.env` from their working directory.
@@ -230,7 +253,7 @@ run the integration tests from the same directory.
 - Run `test` for password checking, report validation, and connection settings.
 - Run `:model:integrationTest` for PostgreSQL-backed authentication, account CRUD,
   connection reuse, report visibility by role, active-category checks, and
-  permissions for edits, cancellations, and administrator status changes.
+  permissions for report and category changes.
 - Submit and edit a report as `alice`, then cancel it. Confirm that its row
   shows `CANCELLED` and that the edit and cancel actions are disabled.
   Sign in as `bob` to confirm it is absent, then as `admin` to find it under
@@ -238,6 +261,10 @@ run the integration tests from the same directory.
 - Submit another report as `alice`. Sign in as `admin` and start work on it. Try
   resolving it with an empty note, then save a valid note. Sign in as `alice` to
   verify the status and note.
+
+- Rename and deactivate a category as `admin`. Verify that an existing report
+  shows the new name and that the inactive category is absent from new reports.
+  Reactivate it to make it available again.
 
 ## Limitations
 

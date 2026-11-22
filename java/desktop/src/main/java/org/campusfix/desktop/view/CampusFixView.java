@@ -40,6 +40,8 @@ public final class CampusFixView {
     private final JFrame frame = new JFrame("CampusFix");
     private final CardLayout layout = new CardLayout();
     private final JPanel cards = new JPanel(layout);
+    private final CardLayout accountLayout = new CardLayout();
+    private final JPanel accountBody = new JPanel(accountLayout);
     private final JTextField username = new JTextField();
     private final JPasswordField password = new JPasswordField();
     private final JButton signIn = new JButton("Sign in");
@@ -49,6 +51,7 @@ public final class CampusFixView {
     private final JLabel accountName = new JLabel();
     private final JButton signOut = new JButton("Sign out");
     private final JButton refresh = new JButton("Refresh");
+    private final JButton categorySection = new JButton("Categories");
     private final JLabel reportListTitle = new JLabel();
     private final JLabel reportStatus = new JLabel(" ");
     private final JTextField reportTitle = new JTextField();
@@ -78,12 +81,12 @@ public final class CampusFixView {
     private boolean reportBusy;
     private long resolutionReportId;
 
-    public CampusFixView() {
+    public CampusFixView(CategoryPanel categories) {
         reportForm = createReportForm();
         resolutionForm = createResolutionForm();
         cards.setBorder(BorderFactory.createEmptyBorder(24, 24, 24, 24));
         cards.add(createSignInPanel(), "sign-in");
-        cards.add(createAccountPanel(), "account");
+        cards.add(createAccountPanel(categories), "account");
         frame.setContentPane(cards);
         frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
     }
@@ -104,12 +107,13 @@ public final class CampusFixView {
         return panel;
     }
 
-    private JPanel createAccountPanel() {
+    private JPanel createAccountPanel(CategoryPanel categories) {
         var heading = new JPanel(new GridLayout(0, 1, 0, 6));
         heading.add(accountTitle);
         heading.add(accountName);
 
         var actions = new JPanel(new FlowLayout(FlowLayout.TRAILING));
+        actions.add(categorySection);
         actions.add(refresh);
         actions.add(signOut);
 
@@ -122,10 +126,15 @@ public final class CampusFixView {
         footer.add(reportForm, BorderLayout.CENTER);
         footer.add(reportStatus, BorderLayout.SOUTH);
 
+        var reportsPanel = new JPanel(new BorderLayout(0, 12));
+        reportsPanel.add(createReportList(), BorderLayout.CENTER);
+        reportsPanel.add(footer, BorderLayout.SOUTH);
+        accountBody.add(reportsPanel, "reports");
+        accountBody.add(categories, "categories");
+
         var panel = new JPanel(new BorderLayout(0, 12));
         panel.add(header, BorderLayout.NORTH);
-        panel.add(createReportList(), BorderLayout.CENTER);
-        panel.add(footer, BorderLayout.SOUTH);
+        panel.add(accountBody, BorderLayout.CENTER);
         return panel;
     }
 
@@ -254,6 +263,10 @@ public final class CampusFixView {
         refresh.addActionListener(event -> action.run());
     }
 
+    public void onSwitchAccountSection(Runnable action) {
+        categorySection.addActionListener(event -> action.run());
+    }
+
     public void onSubmitReport(Runnable action) {
         submit.addActionListener(event -> action.run());
     }
@@ -335,7 +348,7 @@ public final class CampusFixView {
     public void showReportStatus(String message, boolean busy) {
         reportBusy = busy;
         reportStatus.setText(message);
-        refresh.setEnabled(!busy);
+        setAccountActionsEnabled(!busy);
         submit.setEnabled(!busy);
         reportTitle.setEnabled(!busy);
         reportLocation.setEnabled(!busy);
@@ -343,6 +356,16 @@ public final class CampusFixView {
         reportCategory.setEnabled(!busy);
         discardEdit.setEnabled(!busy);
         updateReportActions();
+    }
+
+    public void setAccountActionsEnabled(boolean enabled) {
+        refresh.setEnabled(enabled);
+        categorySection.setEnabled(enabled);
+    }
+
+    public void showCategorySection(boolean managingCategories) {
+        accountLayout.show(accountBody, managingCategories ? "categories" : "reports");
+        categorySection.setText(managingCategories ? "Reports" : "Categories");
     }
 
     public void showCategories(List<CategoryOption> categories) {
@@ -437,6 +460,8 @@ public final class CampusFixView {
         edit.setVisible(canSubmit);
         cancelReport.setVisible(canSubmit);
         startWork.setVisible(!canSubmit);
+        categorySection.setVisible(!canSubmit);
+        showCategorySection(false);
         layout.show(cards, "account");
         frame.getRootPane().setDefaultButton(canSubmit ? submit : null);
         frame.setSize(800, 620);

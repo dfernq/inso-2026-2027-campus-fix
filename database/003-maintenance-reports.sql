@@ -16,5 +16,7 @@ CREATE TABLE IF NOT EXISTS issues (
 
 CREATE INDEX IF NOT EXISTS issues_reporter_id_idx ON issues (reporter_id, id);
 
-INSERT INTO categories (name) VALUES ('Electrical'), ('Facilities'), ('Plumbing')
+INSERT INTO categories (name)
+SELECT name FROM (VALUES ('Electrical'), ('Facilities'), ('Plumbing')) AS defaults(name)
+WHERE NOT EXISTS (SELECT 1 FROM categories)
 ON CONFLICT (name) DO NOTHING;

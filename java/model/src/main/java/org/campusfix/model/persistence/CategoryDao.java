@@ -53,8 +53,33 @@ public final class CategoryDao implements CrudDao<Category> {
         }
     }
 
+    public boolean rename(long id, String name) throws SQLException {
+        String sql = "UPDATE categories SET name = ? WHERE id = ?";
+        try (var statement = database.getConnection().prepareStatement(sql)) {
+            statement.setString(1, name);
+            statement.setLong(2, id);
+            return statement.executeUpdate() == 1;
+        }
+    }
+
+    public boolean setActive(long id, boolean active) throws SQLException {
+        String sql = "UPDATE categories SET active = ? WHERE id = ?";
+        try (var statement = database.getConnection().prepareStatement(sql)) {
+            statement.setBoolean(1, active);
+            statement.setLong(2, id);
+            return statement.executeUpdate() == 1;
+        }
+    }
+
+    public List<Category> findAll() throws SQLException {
+        return queryCategories("SELECT id, name, active FROM categories ORDER BY name");
+    }
+
     public List<Category> findActive() throws SQLException {
-        String sql = "SELECT id, name, active FROM categories WHERE active ORDER BY name";
+        return queryCategories("SELECT id, name, active FROM categories WHERE active ORDER BY name");
+    }
+
+    private List<Category> queryCategories(String sql) throws SQLException {
         try (var statement = database.getConnection().prepareStatement(sql);
              var rows = statement.executeQuery()) {
             var categories = new ArrayList<Category>();

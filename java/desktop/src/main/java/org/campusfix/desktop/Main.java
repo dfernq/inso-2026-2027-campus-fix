@@ -8,6 +8,7 @@ import org.campusfix.model.persistence.CategoryDao;
 import org.campusfix.model.persistence.DatabaseConnection;
 import org.campusfix.model.persistence.IssueDao;
 import org.campusfix.model.persistence.UserDao;
+import org.campusfix.model.reports.CategoryService;
 import org.campusfix.model.reports.IssueService;
 
 public final class Main {
@@ -19,8 +20,11 @@ public final class Main {
                 settings.get("CAMPUSFIX_DB_PASSWORD"));
 
         var authentication = new AuthenticationService(new UserDao(database));
-        var reports = new IssueService(new IssueDao(database), new CategoryDao(database));
-        SwingUtilities.invokeLater(() -> new CampusFixController(database, authentication, reports).start());
+        var categoryDao = new CategoryDao(database);
+        var reports = new IssueService(new IssueDao(database), categoryDao);
+        var categories = new CategoryService(categoryDao);
+        SwingUtilities.invokeLater(
+                () -> new CampusFixController(database, authentication, reports, categories).start());
     }
 }
 

@@ -11,10 +11,13 @@ import javax.swing.SwingUtilities;
 import org.campusfix.desktop.view.CampusFixView;
 import org.campusfix.desktop.view.CampusFixView.CategoryOption;
 import org.campusfix.desktop.view.CampusFixView.ReportRow;
+import org.campusfix.desktop.view.CategoryPanel;
+import org.campusfix.desktop.view.CategoryPanel.CategoryRow;
 import org.campusfix.model.auth.AuthenticationService;
 import org.campusfix.model.domain.Issue;
 import org.campusfix.model.domain.User;
 import org.campusfix.model.persistence.DatabaseConnection;
+import org.campusfix.model.reports.CategoryService;
 import org.campusfix.model.reports.IssueService;
 
 public final class CampusFixController {
@@ -23,22 +26,31 @@ public final class CampusFixController {
     private final DatabaseConnection database;
     private final AuthenticationService authentication;
     private final IssueService reports;
+    private final CategoryService categories;
     private final CampusFixView view;
+    private final CategoryPanel categoryPanel;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private User signedInUser;
     private long editingReportId;
+    private boolean managingCategories;
     private boolean closing;
 
     public CampusFixController(DatabaseConnection database, AuthenticationService authentication,
-                               IssueService reports) {
+                               IssueService reports, CategoryService categories) {
         this.database = database;
         this.authentication = authentication;
         this.reports = reports;
-        view = new CampusFixView();
+        this.categories = categories;
+        categoryPanel = new CategoryPanel();
+        view = new CampusFixView(categoryPanel);
         view.onSignIn(this::signIn);
         view.onCheck(this::checkConnection);
         view.onSignOut(this::signOut);
-        view.onRefresh(this::refreshReports);
+        view.onRefresh(this::refreshAccount);
+        view.onSwitchAccountSection(this::switchAccountSection);
+        categoryPanel.onAdd(() -> changeCategory(CategoryAction.ADD));
+        categoryPanel.onRename(() -> changeCategory(CategoryAction.RENAME));
+        categoryPanel.onToggleActive(() -> changeCategory(CategoryAction.TOGGLE_ACTIVE));
         view.onSubmitReport(this::saveReport);
         view.onEditReport(this::beginEdit);
         view.onCancelReport(this::cancelReport);
@@ -86,7 +98,108 @@ public final class CampusFixController {
     private void signOut() {
         signedInUser = null;
         editingReportId = 0;
+        managingCategories = false;
+        categoryPanel.reset();
         view.showSignIn();
+    }
+
+    private enum CategoryAction {
+        ADD, RENAME, TOGGLE_ACTIVE
+    }
+
+    private void switchAccountSection() {
+        User user = signedInUser;
+        if (user == null || user.role() != User.Role.ADMIN) {
+            return;
+        }
+        managingCategories = !managingCategories;
+        view.showCategorySection(managingCategories);
+        refreshAccount();
+    }
+
+    private void refreshAccount() {
+        if (managingCategories) {
+            loadCategories(null);
+        } else {
+            refreshReports();
+        }
+    }
+
+    private void loadCategories(String successMessage) {
+        User administrator = signedInUser;
+        if (administrator == null) {
+            return;
+        }
+        String progress = successMessage == null
+                ? "Loading categories..." : String.format("%s Refreshing...", successMessage);
+        showCategoryStatus(progress, true);
+        worker.execute(() -> {
+            try {
+                var rows = categories.list(administrator).stream()
+                        .map(category -> new CategoryRow(category.id(), category.name(), category.active()))
+                        .toList();
+                updateAccount(administrator, () -> {
+                    categoryPanel.showCategories(rows);
+                    String message = successMessage == null ? "Categories up to date." : successMessage;
+                    showCategoryStatus(message, false);
+                });
+            } catch (SQLException exception) {
+                LOGGER.log(Level.WARNING, "Loading categories failed.", exception);
+                String message = successMessage == null
+                        ? "Could not load categories. Try Refresh."
+                        : String.format("%s Could not refresh categories.", successMessage);
+                updateAccount(administrator, () -> showCategoryStatus(message, false));
+            }
+        });
+    }
+
+    private void changeCategory(CategoryAction action) {
+        User administrator = signedInUser;
+        if (administrator == null) {
+            return;
+        }
+        var selected = categoryPanel.selectedCategory();
+        if (action != CategoryAction.ADD && selected == null) {
+            return;
+        }
+
+        String name = action == CategoryAction.ADD ? categoryPanel.newName() : categoryPanel.selectedName();
+        showCategoryStatus("Saving category...", true);
+        worker.execute(() -> {
+            try {
+                String message = switch (action) {
+                    case ADD -> {
+                        categories.create(administrator, name);
+                        yield "Category added.";
+                    }
+                    case RENAME -> {
+                        categories.rename(administrator, selected.id(), name);
+                        yield "Category renamed.";
+                    }
+                    case TOGGLE_ACTIVE -> {
+                        boolean active = !selected.active();
+                        categories.setActive(administrator, selected.id(), active);
+                        yield active ? "Category activated." : "Category deactivated.";
+                    }
+                };
+                updateAccount(administrator, () -> {
+                    if (action == CategoryAction.ADD) {
+                        categoryPanel.clearNewName();
+                    }
+                    loadCategories(message);
+                });
+            } catch (IllegalArgumentException exception) {
+                updateAccount(administrator, () -> showCategoryStatus(exception.getMessage(), false));
+            } catch (SQLException exception) {
+                LOGGER.log(Level.WARNING, "Saving a category failed.", exception);
+                updateAccount(administrator, () -> showCategoryStatus("Could not save the category.", false));
+            }
+        });
+    }
+
+    private void showCategoryStatus(String message, boolean busy) {
+        view.setAccountActionsEnabled(!busy);
+        categoryPanel.showStatus(message, busy);
     }
 
     private void refreshReports() {
