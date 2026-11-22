@@ -21,7 +21,6 @@ import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
-import javax.swing.table.DefaultTableModel;
 
 public final class CampusFixView {
     public record CategoryOption(long id, String name) {
@@ -69,15 +68,8 @@ public final class CampusFixView {
     private final JPanel reportForm;
     private final JPanel resolutionForm;
     private final JTextArea selectedDescription = new JTextArea(3, 28);
-    private final DefaultTableModel reportTable = new DefaultTableModel(
-            new String[]{"ID", "Title", "Category", "Location", "Reporter", "Status"}, 0) {
-        @Override
-        public boolean isCellEditable(int row, int column) {
-            return false;
-        }
-    };
+    private final ReportTableModel reportTable = new ReportTableModel();
     private final JTable reports = new JTable(reportTable);
-    private List<ReportRow> displayedReports = List.of();
     private boolean reportBusy;
     private long resolutionReportId;
 
@@ -213,7 +205,7 @@ public final class CampusFixView {
 
     public ReportRow selectedReport() {
         int index = reports.getSelectedRow();
-        return index < 0 ? null : displayedReports.get(index);
+        return index < 0 ? null : reportTable.rowAt(index);
     }
 
     private void showSelectedReport() {
@@ -384,18 +376,10 @@ public final class CampusFixView {
     public void showReports(List<ReportRow> rows) {
         var previousSelection = selectedReport();
         reports.clearSelection();
-        displayedReports = rows;
-        reportTable.setRowCount(0);
-        int selectedIndex = 0;
-        for (var row : rows) {
-            if (previousSelection != null && row.id() == previousSelection.id()) {
-                selectedIndex = reportTable.getRowCount();
-            }
-            reportTable.addRow(new Object[]{
-                    row.id(), row.title(), row.category(), row.location(), row.reporter(), row.status()
-            });
-        }
+        reportTable.setRows(rows);
         if (!rows.isEmpty()) {
+            int selectedIndex = previousSelection == null ? 0 : reportTable.indexOfReport(previousSelection.id());
+            selectedIndex = Math.max(0, selectedIndex);
             reports.setRowSelectionInterval(selectedIndex, selectedIndex);
         }
         updateReportActions();

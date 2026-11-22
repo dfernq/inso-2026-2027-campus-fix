@@ -101,6 +101,19 @@ This keeps worker scheduling and error handling in one place. Changes to
 that flow apply to every report action, while each action keeps its own
 inputs and completion behavior.
 
+### Adapt report rows for the Swing table
+
+`JTable` expects a `TableModel` that answers questions about row counts,
+column names, and individual cells. The Controller supplies a list of
+`ReportRow` values. `ReportTableModel` adapts that list to Swing's interface,
+so a request for the title cell reads the title from the corresponding row.
+
+The table and the report details now read from the same snapshot of report
+rows. Refreshing replaces the snapshot and sends Swing one table update.
+The View restores the selection by report ID, so the same report stays
+selected when a newer report moves it down the list. The adapter stays in
+the View layer and works with the presentation data supplied by the Controller.
+
 ## Architecture
 
 The `java/model` module contains database access without a UI dependency.
@@ -125,6 +138,7 @@ classDiagram
     CampusFixController --> CampusFixView : view
     CampusFixController --> CategoryPanel : category view
     CampusFixView --> CategoryPanel : hosts
+    CampusFixView --> ReportTableModel : report table adapter
     CampusFixController --> DatabaseConnection : database
     CampusFixController --> AuthenticationService : authentication
     CampusFixController --> IssueService : reports
@@ -152,6 +166,7 @@ render data from the Controller and forward UI events through those callbacks.
 | `DesktopDatabase` | Load `.env` and provide one connection manager per desktop process. |
 | `CampusFixController` | Create the View, keep the signed-in user in memory, and run database operations on one worker. |
 | `CampusFixView` | Render the sign-in form, report form, and report list. |
+| `ReportTableModel` | Expose the report rows through Swing's table interface. |
 | `AuthenticationService` | Authenticate the submitted credentials and return the user on success. |
 | `UserDao` | Implement account CRUD and username lookup with parameterized SQL. |
 | `IssueService` | Validate report changes, check permissions, and select the list for the signed-in role. |
