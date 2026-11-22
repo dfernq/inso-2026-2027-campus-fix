@@ -63,6 +63,23 @@ The maintenance-report migration seeds the default categories only when the
 category table is empty. Rerunning the launcher preserves renames and inactive
 categories.
 
+### Share the desktop database using Singleton
+
+The Singleton gives the desktop process one owner for its database
+connection. If another startup component requests database access, it
+reuses the configured manager and avoids opening a separate PostgreSQL
+session that would need to be closed separately.
+
+`DesktopDatabase` has a private constructor and a synchronized `getInstance()`
+method. The first call loads the database settings from `.env` and creates the
+connection manager. Later calls return the same instance. The manager opens
+the JDBC connection on the first database operation.
+
+`Main` passes the manager to the Controller and DAOs. They receive their
+database dependency explicitly, so integration tests can supply a manager
+configured for `campusfix_test`. The Controller's worker still owns JDBC
+access and closes the connection when the window closes.
+
 ## Architecture
 
 The `java/model` module contains database access without a UI dependency.
@@ -76,7 +93,8 @@ classDiagram
         <<interface>>
     }
     Main ..> CampusFixController : creates
-    Main ..> DatabaseConnection : creates
+    Main ..> DesktopDatabase : gets instance
+    DesktopDatabase --> DatabaseConnection : connection
     Main ..> AuthenticationService : creates
     Main ..> UserDao : creates
     Main ..> IssueService : creates
@@ -102,14 +120,15 @@ classDiagram
     CrudDao <|.. CategoryDao
 ```
 
-`Main` creates a `DatabaseConnection` and passes it to the three DAOs. The
-Controller creates the Views and binds `Runnable` callbacks for account,
-report, and category actions. The Views render data from the Controller and
-forward UI events through those callbacks.
+`Main` gets the shared `DatabaseConnection` from `DesktopDatabase` and passes
+it to the Controller and the three DAOs. The Controller creates the Views and
+binds `Runnable` callbacks for account, report, and category actions. The Views
+render data from the Controller and forward UI events through those callbacks.
 
 | Class | Responsibility |
 | --- | --- |
-| `Main` | Read `.env` connection settings, construct the Model objects, and start the Controller on Swing's event thread. |
+| `Main` | Get the connection manager, construct the Model objects, and start the Controller on Swing's event thread. |
+| `DesktopDatabase` | Load `.env` and provide one connection manager per desktop process. |
 | `CampusFixController` | Create the View, keep the signed-in user in memory, and run database operations on one worker. |
 | `CampusFixView` | Render the sign-in form, report form, and report list. |
 | `AuthenticationService` | Authenticate the submitted credentials and return the user on success. |
