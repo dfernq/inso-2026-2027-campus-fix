@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
+from functools import partial
 from tkinter import Tk
 from typing import TypeVar
 
@@ -42,6 +43,8 @@ class CampusFixController:
         self._view.on_edit_report(self._begin_edit)
         self._view.on_cancel_report(self._cancel_report)
         self._view.on_discard_edit(self._discard_edit)
+        self._view.on_start_work(lambda: self._advance_report(Status.IN_PROGRESS))
+        self._view.on_resolve_report(lambda: self._advance_report(Status.RESOLVED))
         self._window.protocol("WM_DELETE_WINDOW", self._close_window)
 
     def start(self) -> None:
@@ -99,7 +102,11 @@ class CampusFixController:
         rows = []
         for report in self._reports.list(user):
             issue = report.issue
-            can_manage = user.role is Role.REGULAR and issue.status is Status.OPEN
+            admin = user.role is Role.ADMIN
+            open_report = issue.status is Status.OPEN
+            can_manage = user.role is Role.REGULAR and open_report
+            can_start_work = admin and open_report
+            can_resolve = admin and issue.status is Status.IN_PROGRESS
             rows.append(
                 ReportRow(
                     issue.id,
@@ -110,7 +117,10 @@ class CampusFixController:
                     report.reporter_name,
                     issue.status.value,
                     issue.description,
+                    issue.resolution_note,
                     can_manage,
+                    can_start_work,
+                    can_resolve,
                 )
             )
 
@@ -179,7 +189,7 @@ class CampusFixController:
         self._when_ready(
             result,
             lambda completed: self._complete_report_change(
-                completed, message, "Could not save the report.", clear_form=True
+                completed, message, "Could not save the report.", on_success=self._discard_edit
             ),
         )
 
@@ -193,18 +203,55 @@ class CampusFixController:
 
         self._view.show_report_status("Cancelling report...", busy=True)
         result = self._worker.submit(self._reports.cancel, user, report.id)
+        on_success = self._discard_edit if self._editing_report_id == report.id else None
         self._when_ready(
             result,
             lambda completed: self._complete_report_change(
                 completed,
                 "Report cancelled.",
                 "Could not cancel the report.",
-                clear_form=self._editing_report_id == report.id,
+                on_success=on_success,
+            ),
+        )
+
+    def _advance_report(self, target_status: Status) -> None:
+        user = self._signed_in_user
+        report = self._view.selected_report()
+        if user is None or report is None:
+            return
+        resolving = target_status is Status.RESOLVED
+        allowed = report.can_resolve if resolving else report.can_start_work
+        if not allowed:
+            return
+
+        if resolving:
+            note = self._view.resolution_note()
+            self._view.show_report_status("Resolving report...", busy=True)
+            result = self._worker.submit(self._reports.resolve, user, report.id, note)
+            message = "Report resolved."
+            failure = "Could not resolve the report."
+            on_success = partial(self._view.clear_resolution_note, report.id)
+        else:
+            self._view.show_report_status("Starting work...", busy=True)
+            result = self._worker.submit(self._reports.start_work, user, report.id)
+            message = "Work started."
+            failure = "Could not start work."
+            on_success = None
+
+        self._when_ready(
+            result,
+            lambda completed: self._complete_report_change(
+                completed, message, failure, on_success=on_success
             ),
         )
 
     def _complete_report_change(
-        self, result: Future[T], message: str, failure_message: str, *, clear_form: bool
+        self,
+        result: Future[T],
+        message: str,
+        failure_message: str,
+        *,
+        on_success: Callable[[], None] | None,
     ) -> None:
         try:
             result.result()
@@ -217,8 +264,8 @@ class CampusFixController:
             return
 
         self._view.show_report_status(message, busy=False)
-        if clear_form:
-            self._discard_edit()
+        if on_success is not None:
+            on_success()
         self._load_reports(change_message=message)
 
     def _check_connection(self) -> None:

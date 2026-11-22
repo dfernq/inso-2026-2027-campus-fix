@@ -19,7 +19,10 @@ class ReportRow:
     reporter: str
     status: str
     description: str
+    resolution_note: str | None
     can_manage: bool
+    can_start_work: bool
+    can_resolve: bool
 
 
 class CampusFixView:
@@ -29,6 +32,7 @@ class CampusFixView:
         self._categories: list[CategoryOption] = []
         self._displayed_reports: dict[str, ReportRow] = {}
         self._report_busy = False
+        self._resolution_report_id: int | None = None
 
         content = ttk.Frame(window, padding=24)
         content.pack(fill="both", expand=True)
@@ -72,6 +76,7 @@ class CampusFixView:
 
         self._create_report_list()
         self._create_report_form()
+        self._create_resolution_form()
         self._report_status = ttk.Label(self._account_panel)
         self._report_status.pack(fill="x", pady=(8, 0))
 
@@ -87,7 +92,7 @@ class CampusFixView:
         self._reports = ttk.Treeview(
             table, columns=columns, show="headings", selectmode="browse", height=6
         )
-        for name, width in zip(columns, (45, 190, 110, 125, 90, 70)):
+        for name, width in zip(columns, (45, 170, 110, 125, 90, 105)):
             self._reports.heading(name, text=name)
             self._reports.column(name, width=width, stretch=name == "Title")
         self._reports.grid(row=0, column=0, sticky="nsew")
@@ -110,6 +115,12 @@ class CampusFixView:
             self._report_actions, text="Cancel report", state="disabled"
         )
         self._cancel_report_button.pack(side="left", padx=(8, 0))
+
+        self._admin_actions = ttk.Frame(self._account_panel)
+        self._start_work_button = ttk.Button(
+            self._admin_actions, text="Start work", state="disabled"
+        )
+        self._start_work_button.pack(side="left")
 
     def _create_report_form(self) -> None:
         self._report_form = ttk.LabelFrame(
@@ -137,6 +148,15 @@ class CampusFixView:
         self._submit_button.pack(side="left")
         self._discard_edit_button = ttk.Button(actions, text="Discard edit")
 
+    def _create_resolution_form(self) -> None:
+        self._resolution_form = ttk.LabelFrame(
+            self._account_panel, text="Resolution note", padding=8
+        )
+        self._resolution_note = Text(self._resolution_form, height=3, wrap="word")
+        self._resolution_note.pack(fill="x")
+        self._resolve_report_button = ttk.Button(self._resolution_form, text="Resolve report")
+        self._resolve_report_button.pack(anchor="w", pady=(6, 0))
+
     def on_sign_in(self, action: Callable[[], None]) -> None:
         self._sign_in_button.configure(command=action)
         self._username.bind("<Return>", lambda _event: self._sign_in_button.invoke())
@@ -163,6 +183,12 @@ class CampusFixView:
     def on_discard_edit(self, action: Callable[[], None]) -> None:
         self._discard_edit_button.configure(command=action)
 
+    def on_start_work(self, action: Callable[[], None]) -> None:
+        self._start_work_button.configure(command=action)
+
+    def on_resolve_report(self, action: Callable[[], None]) -> None:
+        self._resolve_report_button.configure(command=action)
+
     def username(self) -> str:
         return self._username.get()
 
@@ -187,6 +213,19 @@ class CampusFixView:
 
     def report_description(self) -> str:
         return self._report_description.get("1.0", "end-1c")
+
+    def resolution_note(self) -> str:
+        return self._resolution_note.get("1.0", "end-1c")
+
+    def clear_resolution_note(self, issue_id: int) -> None:
+        if self._resolution_report_id == issue_id:
+            self._clear_resolution_draft()
+
+    def _clear_resolution_draft(self) -> None:
+        self._resolution_note.configure(state="normal")
+        self._resolution_note.delete("1.0", "end")
+        if self._report_busy:
+            self._resolution_note.configure(state="disabled")
 
     def report_category_id(self) -> int:
         index = self._report_category.current()
@@ -239,7 +278,13 @@ class CampusFixView:
 
     def _show_selected_report(self) -> None:
         report = self.selected_report()
+        if report is not None and report.id != self._resolution_report_id:
+            self._resolution_report_id = report.id
+            self._clear_resolution_draft()
+
         description = report.description if report is not None else ""
+        if report is not None and report.resolution_note is not None:
+            description = f"{description}\n\nResolution note\n{report.resolution_note}"
         self._selected_description.configure(state="normal")
         self._selected_description.delete("1.0", "end")
         self._selected_description.insert("1.0", description)
@@ -253,6 +298,18 @@ class CampusFixView:
         state = "normal" if enabled else "disabled"
         self._edit_button.configure(state=state)
         self._cancel_report_button.configure(state=state)
+
+        can_start_work = report is not None and report.can_start_work
+        can_resolve = report is not None and report.can_resolve
+        start_enabled = can_start_work and not self._report_busy
+        resolve_enabled = can_resolve and not self._report_busy
+        self._start_work_button.configure(state="normal" if start_enabled else "disabled")
+        self._resolve_report_button.configure(state="normal" if resolve_enabled else "disabled")
+        self._resolution_note.configure(state="disabled" if self._report_busy else "normal")
+        if can_resolve:
+            self._resolution_form.pack(fill="x", pady=(8, 0), before=self._report_status)
+        else:
+            self._resolution_form.pack_forget()
 
     def show_report_for_editing(self, report: ReportRow) -> None:
         self.clear_report_form()
@@ -287,6 +344,8 @@ class CampusFixView:
         self._account_panel.pack_forget()
         self.show_report_status("", busy=False)
         self.clear_report_form()
+        self._resolution_report_id = None
+        self._clear_resolution_draft()
         self.show_reports([])
         self.show_categories([])
         self._sign_in_panel.pack(fill="both", expand=True)
@@ -304,11 +363,13 @@ class CampusFixView:
         list_title = "My reports" if can_submit else "All reports"
         self._report_list_title.configure(text=list_title)
         if can_submit:
+            self._admin_actions.pack_forget()
             self._report_actions.pack(fill="x", pady=(8, 0), before=self._report_status)
             self._report_form.pack(fill="x", pady=(8, 0), before=self._report_status)
         else:
             self._report_actions.pack_forget()
             self._report_form.pack_forget()
+            self._admin_actions.pack(fill="x", pady=(8, 0), before=self._report_status)
         self._account_panel.pack(fill="both", expand=True)
         self._window.minsize(660, 560)
         self._window.geometry("800x620")

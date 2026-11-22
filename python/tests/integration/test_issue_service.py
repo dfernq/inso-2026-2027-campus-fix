@@ -65,6 +65,8 @@ class IssueServiceIntegrationTest(unittest.TestCase):
         service.cancel(alice, issue.id)
         cancelled = issues.read(issue.id)
         self.assertIs(Status.CANCELLED, cancelled.status)
+        with self.assertRaises(ValueError):
+            service.start_work(admin, issue.id)
         self.assertEqual(edited.title, cancelled.title)
         self.assertIn(cancelled, [row.issue for row in service.list(alice)])
         self.assertIn(cancelled, [row.issue for row in service.list(admin)])
@@ -72,6 +74,51 @@ class IssueServiceIntegrationTest(unittest.TestCase):
             service.edit(alice, issue.id, category_id, "Late edit", "Details", "Hall")
         with self.assertRaises(ValueError):
             service.cancel(alice, issue.id)
+
+    def test_only_administrators_advance_reports_and_resolution_requires_a_note(self) -> None:
+        database = open_test_database(self)
+        users = UserDao(database)
+        issues = IssueDao(database)
+        service = IssueService(issues, CategoryDao(database))
+        alice = users.find_by_username("alice").user
+        admin = users.find_by_username("admin").user
+        category_id = service.active_categories()[0].id
+        issue = service.submit(alice, category_id, "Broken light", "It flickers.", "Library")
+        self.addCleanup(issues.delete, issue.id)
+
+        with self.assertRaises(ValueError):
+            service.start_work(alice, issue.id)
+        with self.assertRaises(ValueError):
+            service.resolve(admin, issue.id, "Replaced.")
+        self.assertEqual(issue, issues.read(issue.id))
+
+        service.start_work(admin, issue.id)
+        in_progress = issues.read(issue.id)
+        self.assertIs(Status.IN_PROGRESS, in_progress.status)
+        self.assertIsNone(in_progress.resolution_note)
+        with self.assertRaises(ValueError):
+            service.start_work(admin, issue.id)
+        with self.assertRaises(ValueError):
+            service.cancel(alice, issue.id)
+        with self.assertRaises(ValueError):
+            service.edit(alice, issue.id, category_id, "Late edit", "Details", "Library")
+        with self.assertRaises(ValueError):
+            service.resolve(alice, issue.id, "Replaced.")
+        for invalid_note in (" ", "x" * 2001):
+            with self.subTest(length=len(invalid_note)):
+                with self.assertRaises(ValueError):
+                    service.resolve(admin, issue.id, invalid_note)
+        self.assertEqual(in_progress, issues.read(issue.id))
+
+        service.resolve(admin, issue.id, "  Replaced the lamp. ")
+        resolved = issues.read(issue.id)
+        self.assertIs(Status.RESOLVED, resolved.status)
+        self.assertEqual("Replaced the lamp.", resolved.resolution_note)
+        self.assertEqual(issue.title, resolved.title)
+        self.assertIn(resolved, [row.issue for row in service.list(alice)])
+        with self.assertRaises(ValueError):
+            service.resolve(admin, issue.id, "Another note.")
+        self.assertEqual(resolved, issues.read(issue.id))
 
     def test_rejects_submissions_and_edits_with_an_inactive_category(self) -> None:
         database = open_test_database(self)

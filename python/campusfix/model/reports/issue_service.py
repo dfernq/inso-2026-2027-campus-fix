@@ -46,10 +46,26 @@ class IssueService:
         if not self._issues.cancel_open(issue_id, reporter.id):
             raise ValueError("Only your open reports can be cancelled.")
 
+    def start_work(self, administrator: User, issue_id: int) -> None:
+        self._require_administrator(administrator)
+        if not self._issues.start_work(issue_id):
+            raise ValueError("Only open reports can be started.")
+
+    def resolve(self, administrator: User, issue_id: int, resolution_note: str) -> None:
+        self._require_administrator(administrator)
+        note = Issue.require_resolution_note(resolution_note)
+        if not self._issues.resolve(issue_id, note):
+            raise ValueError("Only reports in progress can be resolved.")
+
     def list(self, viewer: User) -> list[IssueSummary]:
         if viewer.role is Role.ADMIN:
             return self._issues.find_all()
         return self._issues.find_by_reporter(viewer.id)
+
+    @staticmethod
+    def _require_administrator(user: User) -> None:
+        if user.role is not Role.ADMIN:
+            raise ValueError("Only administrators can start work or resolve reports.")
 
     @staticmethod
     def _require_regular_user(user: User) -> None:

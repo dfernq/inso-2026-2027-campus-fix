@@ -18,6 +18,7 @@ class Issue:
     description: str
     location: str
     status: Status
+    resolution_note: str | None = None
 
     @staticmethod
     def open(
@@ -40,6 +41,10 @@ class Issue:
             _require_text(location, "Location", 120),
             Status.OPEN,
         )
+
+    @staticmethod
+    def require_resolution_note(note: str | None) -> str:
+        return _require_text(note, "Resolution note", 2000)
 
 
 @dataclass(frozen=True)

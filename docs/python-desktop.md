@@ -2,7 +2,7 @@
 
 The Tkinter client lets regular users submit maintenance reports and review
 their own reports. They can edit or cancel a report while it is open.
-Administrators can review reports from all users.
+Administrators can review reports from all users, start work, and record resolutions.
 
 ## Changesets
 
@@ -40,6 +40,17 @@ sets the report to `CANCELLED` and keeps it visible in report lists.
 `IssueService` checks the account role. The update statements check the
 reporter and current status in PostgreSQL so an action from an older screen
 cannot edit or cancel a report after its status changes.
+
+### Start work and resolve reports
+
+Administrators move a report from `OPEN` to `IN_PROGRESS` with **Start work**.
+Once the report is in progress, **Resolve report** moves it to `RESOLVED` with
+a required resolution note of up to 2,000 characters. The reporter can read
+the note in the report details.
+
+`IssueService` checks the administrator role and validates the note. Each DAO
+update checks the report's current status in the same statement that writes
+the new status. Resolution saves the status and note together.
 
 ## Architecture
 
@@ -100,12 +111,16 @@ docker compose exec -T database sh -c \
   < database/003-maintenance-reports.sql &&
 docker compose exec -T database sh -c \
   'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
-  < database/004-report-cancellation.sql
+  < database/004-report-cancellation.sql &&
+docker compose exec -T database sh -c \
+  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
+  < database/005-report-resolution.sql
 ```
 
 `003-maintenance-reports.sql` creates the issue and category tables and seeds the
 initial categories. `004-report-cancellation.sql` allows reports to be marked
-`CANCELLED`. The scripts are safe to rerun.
+`CANCELLED`. `005-report-resolution.sql` adds the two work statuses and the
+resolution note. The scripts are safe to rerun.
 
 ```sh
 cd python
@@ -128,7 +143,9 @@ These sample accounts are for local development databases. Sign in as
 `alice` or `bob` to submit a report under **My reports**. Select an open report
 and choose **Edit report** to load it into the form, or choose **Cancel report**
 and confirm to mark it `CANCELLED`. Sign in as `admin` to see **All reports**.
-Use **Refresh** to load changes from another session.
+Select an open report and choose **Start work**. When the work is complete,
+enter a note and choose **Resolve report**. Use **Refresh** to load changes
+from another session.
 
 The connection uses `CAMPUSFIX_DB_URL`, `CAMPUSFIX_DB_USER`, and
 `CAMPUSFIX_DB_PASSWORD`. Process environment variables override file settings.
@@ -156,7 +173,10 @@ docker compose exec -T database sh -c \
   < database/003-maintenance-reports.sql &&
 docker compose exec -T database sh -c \
   'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix_test' \
-  < database/004-report-cancellation.sql
+  < database/004-report-cancellation.sql &&
+docker compose exec -T database sh -c \
+  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix_test' \
+  < database/005-report-resolution.sql
 ```
 
 Then run the integration suite from `python/` with the virtual environment active.
@@ -167,4 +187,5 @@ python -m unittest discover -s tests/integration
 
 The unit tests cover report validation, password checking, and database settings.
 The integration tests cover connection handling, account CRUD, sign-in, report
-visibility by role, active-category checks, and edit and cancellation permissions.
+visibility by role, active-category checks, and permissions for edits,
+cancellations, and administrator status changes.

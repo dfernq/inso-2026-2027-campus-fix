@@ -7,7 +7,8 @@ from campusfix.model.persistence.database_connection import DatabaseConnection
 
 _REPORT_QUERY = """
     SELECT i.id, i.reporter_id, i.category_id, i.title, i.description,
-           i.location, i.status, u.username AS reporter_name, c.name AS category_name
+           i.location, i.status, i.resolution_note,
+           u.username AS reporter_name, c.name AS category_name
     FROM issues i
     JOIN users u ON u.id = i.reporter_id
     JOIN categories c ON c.id = i.category_id
@@ -21,9 +22,9 @@ class IssueDao(CrudDao[Issue]):
     def create(self, issue: Issue) -> Issue:
         query = """
             INSERT INTO issues
-                (reporter_id, category_id, title, description, location, status)
-            SELECT %s, id, %s, %s, %s, %s FROM categories WHERE id = %s AND active
-            RETURNING id, reporter_id, category_id, title, description, location, status
+                (reporter_id, category_id, title, description, location, status, resolution_note)
+            SELECT %s, id, %s, %s, %s, %s, %s FROM categories WHERE id = %s AND active
+            RETURNING id, reporter_id, category_id, title, description, location, status, resolution_note
         """
         parameters = (
             issue.reporter_id,
@@ -31,6 +32,7 @@ class IssueDao(CrudDao[Issue]):
             issue.description,
             issue.location,
             issue.status.value,
+            issue.resolution_note,
             issue.category_id,
         )
         created = self._query_issue(query, parameters)
@@ -40,7 +42,7 @@ class IssueDao(CrudDao[Issue]):
 
     def read(self, entity_id: int) -> Issue | None:
         query = """
-            SELECT id, reporter_id, category_id, title, description, location, status
+            SELECT id, reporter_id, category_id, title, description, location, status, resolution_note
             FROM issues WHERE id = %s
         """
         return self._query_issue(query, (entity_id,))
@@ -48,7 +50,7 @@ class IssueDao(CrudDao[Issue]):
     def update(self, issue: Issue) -> bool:
         query = """
             UPDATE issues SET category_id = %s, title = %s, description = %s,
-                location = %s, status = %s
+                location = %s, status = %s, resolution_note = %s
             WHERE id = %s
         """
         parameters = (
@@ -57,6 +59,7 @@ class IssueDao(CrudDao[Issue]):
             issue.description,
             issue.location,
             issue.status.value,
+            issue.resolution_note,
             issue.id,
         )
         with self._database.get_connection().cursor() as cursor:
@@ -98,6 +101,23 @@ class IssueDao(CrudDao[Issue]):
             cursor.execute(query, (issue_id, reporter_id))
             return cursor.rowcount == 1
 
+    def start_work(self, issue_id: int) -> bool:
+        query = """
+            UPDATE issues SET status = 'IN_PROGRESS' WHERE id = %s AND status = 'OPEN'
+        """
+        with self._database.get_connection().cursor() as cursor:
+            cursor.execute(query, (issue_id,))
+            return cursor.rowcount == 1
+
+    def resolve(self, issue_id: int, resolution_note: str) -> bool:
+        query = """
+            UPDATE issues SET status = 'RESOLVED', resolution_note = %s
+            WHERE id = %s AND status = 'IN_PROGRESS'
+        """
+        with self._database.get_connection().cursor() as cursor:
+            cursor.execute(query, (resolution_note, issue_id))
+            return cursor.rowcount == 1
+
     def find_all(self) -> list[IssueSummary]:
         return self._query_reports(f"{_REPORT_QUERY} ORDER BY i.id DESC", ())
 
@@ -106,7 +126,7 @@ class IssueDao(CrudDao[Issue]):
         return self._query_reports(query, (reporter_id,))
 
     def _query_issue(
-        self, query: str, parameters: tuple[int | str, ...]
+        self, query: str, parameters: tuple[int | str | None, ...]
     ) -> Issue | None:
         with self._database.get_connection().cursor(row_factory=dict_row) as cursor:
             cursor.execute(query, parameters)
@@ -135,4 +155,5 @@ class IssueDao(CrudDao[Issue]):
             row["description"],
             row["location"],
             Status(row["status"]),
+            row["resolution_note"],
         )
