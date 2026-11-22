@@ -5,18 +5,12 @@ Campus maintenance reporting application.
 ## Run locally
 
 On first setup, copy `.env.example` to `.env` and set the database passwords.
-Start PostgreSQL from the repository root:
+
+For Java, start Docker and use JDK 17 or newer. Run the launcher from the
+repository root to start PostgreSQL, apply the migrations, and open the client.
 
 ```sh
-docker compose up -d --wait
-```
-
-For Java, use JDK 17 or newer and [apply the migrations](docs/java-desktop.md#apply-database-migrations).
-Then run the desktop client.
-
-```sh
-cd java
-./gradlew :desktop:run
+bash java/run.sh
 ```
 
 For Python, [apply the migrations and set up the virtual environment](docs/python-desktop.md#run-locally).

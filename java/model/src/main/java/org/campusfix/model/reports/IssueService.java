@@ -44,11 +44,32 @@ public final class IssueService {
         }
     }
 
+    public void startWork(User administrator, long issueId) throws SQLException {
+        requireAdministrator(administrator);
+        if (!issues.startWork(issueId)) {
+            throw new IllegalArgumentException("Only open reports can be started.");
+        }
+    }
+
+    public void resolve(User administrator, long issueId, String resolutionNote) throws SQLException {
+        requireAdministrator(administrator);
+        String note = Issue.requireResolutionNote(resolutionNote);
+        if (!issues.resolve(issueId, note)) {
+            throw new IllegalArgumentException("Only reports in progress can be resolved.");
+        }
+    }
+
     public List<Issue.Summary> list(User viewer) throws SQLException {
         if (viewer.role() == User.Role.ADMIN) {
             return issues.findAll();
         }
         return issues.findByReporter(viewer.id());
+    }
+
+    private static void requireAdministrator(User user) {
+        if (user.role() != User.Role.ADMIN) {
+            throw new IllegalArgumentException("Only administrators can start work or resolve reports.");
+        }
     }
 
     private static void requireRegularUser(User user) {

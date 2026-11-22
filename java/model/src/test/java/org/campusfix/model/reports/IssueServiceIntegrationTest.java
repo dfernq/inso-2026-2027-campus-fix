@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -75,6 +76,7 @@ class IssueServiceIntegrationTest {
                 service.cancel(alice, issue.id());
                 var cancelled = issues.read(issue.id()).orElseThrow();
                 assertEquals(Issue.Status.CANCELLED, cancelled.status());
+                assertThrows(IllegalArgumentException.class, () -> service.startWork(admin, issue.id()));
                 assertEquals(edited.title(), cancelled.title());
                 assertTrue(service.list(alice).stream().anyMatch(row -> row.issue().equals(cancelled)));
                 assertTrue(service.list(admin).stream().anyMatch(row -> row.issue().equals(cancelled)));
@@ -83,6 +85,50 @@ class IssueServiceIntegrationTest {
                 assertThrows(IllegalArgumentException.class, () -> service.cancel(alice, issue.id()));
             } finally {
                 issues.delete(issue.id());
+            }
+        }
+    }
+
+    @Test
+    void onlyAdministratorsAdvanceReportsAndResolutionRequiresANote() throws SQLException {
+        try (var database = TestDatabase.open()) {
+            var users = new UserDao(database);
+            var issues = new IssueDao(database);
+            var service = new IssueService(issues, new CategoryDao(database));
+            var alice = users.findByUsername("alice").orElseThrow().user();
+            var admin = users.findByUsername("admin").orElseThrow().user();
+            long categoryId = service.activeCategories().get(0).id();
+            var issue = service.submit(alice, categoryId, "Broken light", "It flickers.", "Library");
+            long id = issue.id();
+
+            try {
+                assertThrows(IllegalArgumentException.class, () -> service.startWork(alice, id));
+                assertThrows(IllegalArgumentException.class, () -> service.resolve(admin, id, "Replaced."));
+                assertEquals(issue, issues.read(id).orElseThrow());
+
+                service.startWork(admin, id);
+                var inProgress = issues.read(id).orElseThrow();
+                assertEquals(Issue.Status.IN_PROGRESS, inProgress.status());
+                assertNull(inProgress.resolutionNote());
+                assertThrows(IllegalArgumentException.class, () -> service.startWork(admin, id));
+                assertThrows(IllegalArgumentException.class, () -> service.cancel(alice, id));
+                assertThrows(IllegalArgumentException.class,
+                        () -> service.edit(alice, id, categoryId, "Late edit", "Details", "Library"));
+                assertThrows(IllegalArgumentException.class, () -> service.resolve(alice, id, "Replaced."));
+                assertThrows(IllegalArgumentException.class, () -> service.resolve(admin, id, " "));
+                assertThrows(IllegalArgumentException.class, () -> service.resolve(admin, id, "x".repeat(2001)));
+                assertEquals(inProgress, issues.read(id).orElseThrow());
+
+                service.resolve(admin, id, "  Replaced the lamp. ");
+                var resolved = issues.read(id).orElseThrow();
+                assertEquals(Issue.Status.RESOLVED, resolved.status());
+                assertEquals("Replaced the lamp.", resolved.resolutionNote());
+                assertEquals(issue.title(), resolved.title());
+                assertTrue(service.list(alice).stream().anyMatch(row -> row.issue().equals(resolved)));
+                assertThrows(IllegalArgumentException.class, () -> service.resolve(admin, id, "Another note."));
+                assertEquals(resolved, issues.read(id).orElseThrow());
+            } finally {
+                issues.delete(id);
             }
         }
     }

@@ -43,6 +43,8 @@ public final class CampusFixController {
         view.onEditReport(this::beginEdit);
         view.onCancelReport(this::cancelReport);
         view.onDiscardEdit(this::discardEdit);
+        view.onStartWork(() -> advanceReport(Issue.Status.IN_PROGRESS));
+        view.onResolveReport(() -> advanceReport(Issue.Status.RESOLVED));
         view.onClose(this::close);
     }
 
@@ -196,6 +198,43 @@ public final class CampusFixController {
         });
     }
 
+    private void advanceReport(Issue.Status targetStatus) {
+        User user = signedInUser;
+        var report = view.selectedReport();
+        if (user == null || report == null) {
+            return;
+        }
+        boolean resolving = targetStatus == Issue.Status.RESOLVED;
+        boolean allowed = resolving ? report.canResolve() : report.canStartWork();
+        if (!allowed) {
+            return;
+        }
+
+        String note = resolving ? view.resolutionNote() : null;
+        view.showReportStatus(resolving ? "Resolving report..." : "Starting work...", true);
+        worker.execute(() -> {
+            try {
+                if (resolving) {
+                    reports.resolve(user, report.id(), note);
+                } else {
+                    reports.startWork(user, report.id());
+                }
+                updateAccount(user, () -> {
+                    if (resolving) {
+                        view.clearResolutionNote(report.id());
+                    }
+                    refreshAfterChange(resolving ? "Report resolved." : "Work started.");
+                });
+            } catch (IllegalArgumentException exception) {
+                updateAccount(user, () -> view.showReportStatus(exception.getMessage(), false));
+            } catch (SQLException exception) {
+                LOGGER.log(Level.WARNING, "Updating the report status failed.", exception);
+                String message = resolving ? "Could not resolve the report." : "Could not start work.";
+                updateAccount(user, () -> view.showReportStatus(message, false));
+            }
+        });
+    }
+
     private void refreshAfterChange(String message) {
         loadReports(String.format("%s Refreshing...", message), message,
                 String.format("%s Could not refresh reports.", message));
@@ -203,10 +242,14 @@ public final class CampusFixController {
 
     private static ReportRow reportRow(User viewer, Issue.Summary report) {
         var issue = report.issue();
-        boolean canManage = viewer.role() == User.Role.REGULAR && issue.status() == Issue.Status.OPEN;
+        boolean admin = viewer.role() == User.Role.ADMIN;
+        boolean open = issue.status() == Issue.Status.OPEN;
+        boolean canManage = viewer.role() == User.Role.REGULAR && open;
+        boolean canStartWork = admin && open;
+        boolean canResolve = admin && issue.status() == Issue.Status.IN_PROGRESS;
         return new ReportRow(issue.id(), issue.title(), issue.categoryId(), report.categoryName(),
                 issue.location(), report.reporterName(), issue.status().name(),
-                issue.description(), canManage);
+                issue.description(), issue.resolutionNote(), canManage, canStartWork, canResolve);
     }
 
     private void updateAccount(User user, Runnable update) {

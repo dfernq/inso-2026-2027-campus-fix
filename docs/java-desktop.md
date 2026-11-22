@@ -2,7 +2,7 @@
 
 The Swing client lets regular users submit maintenance reports and review their
 own reports. They can edit or cancel a report while it is open. Administrators
-can review reports from all users.
+can review reports from all users, start work, and record resolutions.
 
 ## Changesets
 
@@ -39,6 +39,17 @@ sets the report to `CANCELLED` and keeps it visible in report lists.
 `IssueService` checks the account role. The update statements check the
 reporter and current status in PostgreSQL so an action from an older screen
 cannot edit or cancel a report after its status changes.
+
+### Start work and resolve reports
+
+Administrators move a report from `OPEN` to `IN_PROGRESS` with **Start work**.
+Once the report is in progress, **Resolve report** moves it to `RESOLVED` with
+a required resolution note of up to 2,000 characters. The reporter can read
+the note from the report list.
+
+`IssueService` checks the administrator role and validates the note. Each DAO
+update checks the report's current status in the same statement that writes
+the new status. Resolution saves the status and note together.
 
 ## Architecture
 
@@ -86,7 +97,7 @@ renders data from the Controller and forwards UI events through those callbacks.
 | `CampusFixView` | Render the sign-in form, report form, and report list. |
 | `AuthenticationService` | Authenticate the submitted credentials and return the user on success. |
 | `UserDao` | Implement account CRUD and username lookup with parameterized SQL. |
-| `IssueService` | Validate report submissions and edits, check permissions, and select the list for the signed-in role. |
+| `IssueService` | Validate report changes, check permissions, and select the list for the signed-in role. |
 | `IssueDao` | Persist issues and query their reporter and category names. |
 | `CategoryDao` | Persist categories and look up active categories. |
 | `DatabaseConnection` | Open, reuse, check, and close the JDBC connection. |
@@ -95,19 +106,19 @@ Account passwords are stored as a 16-byte salt and a 32-byte PBKDF2-HMAC-SHA256
 hash derived with 600,000 iterations. The account roles are distinct from the
 PostgreSQL login role used to connect to the database.
 
-## Start PostgreSQL
+## Run locally
 
-From the repository root, with Docker running:
-
-```sh
-cp .env.example .env
-```
-
-Edit `.env` to set the application and setup passwords, then start PostgreSQL:
+Use JDK 17 or newer and start Docker. On first setup, copy `.env.example`
+to `.env` in the repository root and set the application and setup passwords.
+From the repository root, run the launcher in Bash or Zsh. On Windows,
+use Git Bash.
 
 ```sh
-docker compose up -d --wait
+bash java/run.sh
 ```
+
+The launcher starts PostgreSQL, applies the application migrations in order,
+and opens the desktop client. You can rerun the same command after changes.
 
 Compose reads `.env` and passes the configured credentials to PostgreSQL. The
 initialization script uses psql's `\getenv` command to read the application role
@@ -124,28 +135,18 @@ an already provisioned application role and databases.
 
 ## Apply database migrations
 
-Run these commands from the repository root after PostgreSQL starts. `002-accounts.sql`
-creates and seeds the accounts. `003-maintenance-reports.sql` creates the issue
+The launcher runs the migrations on `campusfix`. `002-accounts.sql` creates and
+seeds the accounts. `003-maintenance-reports.sql` creates the issue
 and category tables and adds the initial categories. `004-report-cancellation.sql`
-allows reports to be marked `CANCELLED`. The scripts are safe to rerun.
-
-### Application database
-
-```sh
-docker compose exec -T database sh -c \
-  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
-  < database/002-accounts.sql &&
-docker compose exec -T database sh -c \
-  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
-  < database/003-maintenance-reports.sql &&
-docker compose exec -T database sh -c \
-  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
-  < database/004-report-cancellation.sql
-```
+allows reports to be marked `CANCELLED`. `005-report-resolution.sql` adds the
+two work statuses and the resolution note. The scripts are safe to rerun.
 
 ### Integration test database
 
+From the repository root, start PostgreSQL and apply the same migrations to `campusfix_test`.
+
 ```sh
+docker compose up -d --wait &&
 docker compose exec -T database sh -c \
   'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix_test' \
   < database/002-accounts.sql &&
@@ -154,11 +155,17 @@ docker compose exec -T database sh -c \
   < database/003-maintenance-reports.sql &&
 docker compose exec -T database sh -c \
   'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix_test' \
-  < database/004-report-cancellation.sql
+  < database/004-report-cancellation.sql &&
+docker compose exec -T database sh -c \
+  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix_test' \
+  < database/005-report-resolution.sql
 ```
 
 For an existing PostgreSQL server, apply the SQL files in order using the
-configured application role.
+configured application role, then run `./java/gradlew -p java :desktop:run`
+from the repository root. On Windows, use `java\gradlew.bat` as the wrapper.
+
+## Use the client
 
 | Username | Password | Role |
 | --- | --- | --- |
@@ -168,24 +175,13 @@ configured application role.
 
 These sample accounts are for local development databases.
 
-## Build and run
-
-Use these Gradle tasks from the repository root.
-
-```sh
-cd java
-./gradlew test
-./gradlew :model:integrationTest
-./gradlew :desktop:run
-```
-
-On Windows, use `gradlew.bat` instead of `./gradlew`.
-
 Sign in as `alice` or `bob` to submit a report and see **My reports**. Select
 an open report and choose **Edit report** to load it into the form, or choose
 **Cancel report** and confirm to mark it `CANCELLED`. Sign in as `admin` to
-see **All reports**. Use **Refresh** to load changes made by another session.
-Closing the window shuts down the worker and connection.
+see **All reports**. Select an open report and choose **Start work**. Add a
+resolution note and choose **Resolve report** when work is complete. Use
+**Refresh** to load changes made by another session. Closing the window shuts
+down the worker and connection.
 
 ## Configuration
 
@@ -223,14 +219,25 @@ port can be configured in `compose.yaml`; update both JDBC URLs accordingly.
 
 ## Verification
 
+Run the unit tests from the repository root. After migrating the test database,
+run the integration tests from the same directory.
+
+```sh
+./java/gradlew -p java test
+./java/gradlew -p java :model:integrationTest
+```
+
 - Run `test` for password checking, report validation, and connection settings.
 - Run `:model:integrationTest` for PostgreSQL-backed authentication, account CRUD,
-  connection reuse, report visibility by role, active-category checks, and edit
-  and cancellation permissions.
+  connection reuse, report visibility by role, active-category checks, and
+  permissions for edits, cancellations, and administrator status changes.
 - Submit and edit a report as `alice`, then cancel it. Confirm that its row
   shows `CANCELLED` and that the edit and cancel actions are disabled.
   Sign in as `bob` to confirm it is absent, then as `admin` to find it under
   **All reports**.
+- Submit another report as `alice`. Sign in as `admin` and start work on it. Try
+  resolving it with an empty note, then save a valid note. Sign in as `alice` to
+  verify the status and note.
 
 ## Limitations
 

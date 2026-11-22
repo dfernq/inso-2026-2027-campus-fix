@@ -10,7 +10,8 @@ import org.campusfix.model.domain.Issue;
 
 public final class IssueDao implements CrudDao<Issue> {
     private static final String REPORT_QUERY = """
-            SELECT i.id, i.reporter_id, i.category_id, i.title, i.description, i.location, i.status,
+            SELECT i.id, i.reporter_id, i.category_id, i.title, i.description,
+                   i.location, i.status, i.resolution_note,
                    u.username AS reporter_name, c.name AS category_name
             FROM issues i
             JOIN users u ON u.id = i.reporter_id
@@ -26,9 +27,9 @@ public final class IssueDao implements CrudDao<Issue> {
     @Override
     public Issue create(Issue issue) throws SQLException {
         String sql = """
-                INSERT INTO issues (reporter_id, category_id, title, description, location, status)
-                SELECT ?, id, ?, ?, ?, ? FROM categories WHERE id = ? AND active
-                RETURNING id, reporter_id, category_id, title, description, location, status
+                INSERT INTO issues (reporter_id, category_id, title, description, location, status, resolution_note)
+                SELECT ?, id, ?, ?, ?, ?, ? FROM categories WHERE id = ? AND active
+                RETURNING id, reporter_id, category_id, title, description, location, status, resolution_note
                 """;
         try (var statement = database.getConnection().prepareStatement(sql)) {
             statement.setLong(1, issue.reporterId());
@@ -36,7 +37,8 @@ public final class IssueDao implements CrudDao<Issue> {
             statement.setString(3, issue.description());
             statement.setString(4, issue.location());
             statement.setString(5, issue.status().name());
-            statement.setLong(6, issue.categoryId());
+            statement.setString(6, issue.resolutionNote());
+            statement.setLong(7, issue.categoryId());
             return queryIssue(statement)
                     .orElseThrow(() -> new IllegalArgumentException("Select an active category."));
         }
@@ -45,7 +47,7 @@ public final class IssueDao implements CrudDao<Issue> {
     @Override
     public Optional<Issue> read(long id) throws SQLException {
         String sql = """
-                SELECT id, reporter_id, category_id, title, description, location, status
+                SELECT id, reporter_id, category_id, title, description, location, status, resolution_note
                 FROM issues WHERE id = ?
                 """;
         try (var statement = database.getConnection().prepareStatement(sql)) {
@@ -57,7 +59,8 @@ public final class IssueDao implements CrudDao<Issue> {
     @Override
     public boolean update(Issue issue) throws SQLException {
         String sql = """
-                UPDATE issues SET category_id = ?, title = ?, description = ?, location = ?, status = ?
+                UPDATE issues SET category_id = ?, title = ?, description = ?, location = ?,
+                    status = ?, resolution_note = ?
                 WHERE id = ?
                 """;
         try (var statement = database.getConnection().prepareStatement(sql)) {
@@ -66,7 +69,8 @@ public final class IssueDao implements CrudDao<Issue> {
             statement.setString(3, issue.description());
             statement.setString(4, issue.location());
             statement.setString(5, issue.status().name());
-            statement.setLong(6, issue.id());
+            statement.setString(6, issue.resolutionNote());
+            statement.setLong(7, issue.id());
             return statement.executeUpdate() == 1;
         }
     }
@@ -111,6 +115,26 @@ public final class IssueDao implements CrudDao<Issue> {
         }
     }
 
+    public boolean startWork(long id) throws SQLException {
+        String sql = "UPDATE issues SET status = 'IN_PROGRESS' WHERE id = ? AND status = 'OPEN'";
+        try (var statement = database.getConnection().prepareStatement(sql)) {
+            statement.setLong(1, id);
+            return statement.executeUpdate() == 1;
+        }
+    }
+
+    public boolean resolve(long id, String resolutionNote) throws SQLException {
+        String sql = """
+                UPDATE issues SET status = 'RESOLVED', resolution_note = ?
+                WHERE id = ? AND status = 'IN_PROGRESS'
+                """;
+        try (var statement = database.getConnection().prepareStatement(sql)) {
+            statement.setString(1, resolutionNote);
+            statement.setLong(2, id);
+            return statement.executeUpdate() == 1;
+        }
+    }
+
     public List<Issue.Summary> findAll() throws SQLException {
         String sql = String.format("%s ORDER BY i.id DESC", REPORT_QUERY);
         try (var statement = database.getConnection().prepareStatement(sql)) {
@@ -146,6 +170,6 @@ public final class IssueDao implements CrudDao<Issue> {
     private static Issue mapIssue(ResultSet row) throws SQLException {
         return new Issue(row.getLong("id"), row.getLong("reporter_id"), row.getLong("category_id"),
                 row.getString("title"), row.getString("description"), row.getString("location"),
-                Issue.Status.valueOf(row.getString("status")));
+                Issue.Status.valueOf(row.getString("status")), row.getString("resolution_note"));
     }
 }

@@ -33,7 +33,8 @@ public final class CampusFixView {
 
     public record ReportRow(long id, String title, long categoryId, String category,
                             String location, String reporter, String status,
-                            String description, boolean canManage) {
+                            String description, String resolutionNote,
+                            boolean canManage, boolean canStartWork, boolean canResolve) {
     }
 
     private final JFrame frame = new JFrame("CampusFix");
@@ -58,8 +59,12 @@ public final class CampusFixView {
     private final JButton discardEdit = new JButton("Discard edit");
     private final JButton edit = new JButton("Edit report");
     private final JButton cancelReport = new JButton("Cancel report");
+    private final JButton startWork = new JButton("Start work");
+    private final JButton resolveReport = new JButton("Resolve report");
+    private final JTextArea resolutionNote = new JTextArea(3, 28);
     private final JPanel reportActions = new JPanel(new FlowLayout(FlowLayout.LEADING));
     private final JPanel reportForm;
+    private final JPanel resolutionForm;
     private final JTextArea selectedDescription = new JTextArea(3, 28);
     private final DefaultTableModel reportTable = new DefaultTableModel(
             new String[]{"ID", "Title", "Category", "Location", "Reporter", "Status"}, 0) {
@@ -71,9 +76,11 @@ public final class CampusFixView {
     private final JTable reports = new JTable(reportTable);
     private List<ReportRow> displayedReports = List.of();
     private boolean reportBusy;
+    private long resolutionReportId;
 
     public CampusFixView() {
         reportForm = createReportForm();
+        resolutionForm = createResolutionForm();
         cards.setBorder(BorderFactory.createEmptyBorder(24, 24, 24, 24));
         cards.add(createSignInPanel(), "sign-in");
         cards.add(createAccountPanel(), "account");
@@ -111,6 +118,7 @@ public final class CampusFixView {
         header.add(actions, BorderLayout.EAST);
 
         var footer = new JPanel(new BorderLayout(0, 8));
+        footer.add(resolutionForm, BorderLayout.NORTH);
         footer.add(reportForm, BorderLayout.CENTER);
         footer.add(reportStatus, BorderLayout.SOUTH);
 
@@ -134,6 +142,7 @@ public final class CampusFixView {
 
         reportActions.add(edit);
         reportActions.add(cancelReport);
+        reportActions.add(startWork);
         var reportDetails = new JPanel(new BorderLayout());
         reportDetails.add(details, BorderLayout.CENTER);
         reportDetails.add(reportActions, BorderLayout.SOUTH);
@@ -170,6 +179,22 @@ public final class CampusFixView {
         return form;
     }
 
+    private JPanel createResolutionForm() {
+        resolutionNote.setLineWrap(true);
+        resolutionNote.setWrapStyleWord(true);
+        var heading = new JLabel("Resolution note");
+        heading.setLabelFor(resolutionNote);
+
+        var actions = new JPanel(new FlowLayout(FlowLayout.LEADING, 0, 0));
+        actions.add(resolveReport);
+        var form = new JPanel(new BorderLayout(0, 4));
+        form.add(heading, BorderLayout.NORTH);
+        form.add(new JScrollPane(resolutionNote), BorderLayout.CENTER);
+        form.add(actions, BorderLayout.SOUTH);
+        form.setVisible(false);
+        return form;
+    }
+
     private static void addField(JPanel fields, String name, JComponent field) {
         var label = new JLabel(name);
         label.setLabelFor(field);
@@ -184,7 +209,16 @@ public final class CampusFixView {
 
     private void showSelectedReport() {
         var report = selectedReport();
-        selectedDescription.setText(report == null ? "" : report.description());
+        if (report != null && report.id() != resolutionReportId) {
+            resolutionReportId = report.id();
+            resolutionNote.setText("");
+        }
+
+        String description = report == null ? "" : report.description();
+        if (report != null && report.resolutionNote() != null) {
+            description = String.format("%s%n%nResolution note%n%s", description, report.resolutionNote());
+        }
+        selectedDescription.setText(description);
         selectedDescription.setCaretPosition(0);
         updateReportActions();
     }
@@ -195,6 +229,13 @@ public final class CampusFixView {
         boolean enabled = !reportBusy && manageable;
         edit.setEnabled(enabled);
         cancelReport.setEnabled(enabled);
+
+        boolean canStartWork = report != null && report.canStartWork();
+        boolean canResolve = report != null && report.canResolve();
+        startWork.setEnabled(!reportBusy && canStartWork);
+        resolveReport.setEnabled(!reportBusy && canResolve);
+        resolutionNote.setEnabled(!reportBusy);
+        resolutionForm.setVisible(canResolve);
     }
 
     public void onSignIn(Runnable action) {
@@ -229,6 +270,14 @@ public final class CampusFixView {
         discardEdit.addActionListener(event -> action.run());
     }
 
+    public void onStartWork(Runnable action) {
+        startWork.addActionListener(event -> action.run());
+    }
+
+    public void onResolveReport(Runnable action) {
+        resolveReport.addActionListener(event -> action.run());
+    }
+
     public void onClose(Runnable action) {
         frame.addWindowListener(new WindowAdapter() {
             @Override
@@ -258,6 +307,16 @@ public final class CampusFixView {
 
     public String reportDescription() {
         return reportDescription.getText();
+    }
+
+    public String resolutionNote() {
+        return resolutionNote.getText();
+    }
+
+    public void clearResolutionNote(long id) {
+        if (resolutionReportId == id) {
+            resolutionNote.setText("");
+        }
     }
 
     public long reportCategoryId() {
@@ -359,6 +418,8 @@ public final class CampusFixView {
         username.setText("");
         password.setText("");
         clearReportForm();
+        resolutionReportId = 0;
+        resolutionNote.setText("");
         showReports(List.of());
         showCategories(List.of());
         showStatus("Sign in to CampusFix.", false);
@@ -373,7 +434,9 @@ public final class CampusFixView {
         accountName.setText(String.format("Signed in as %s", name));
         reportListTitle.setText(canSubmit ? "My reports" : "All reports");
         reportForm.setVisible(canSubmit);
-        reportActions.setVisible(canSubmit);
+        edit.setVisible(canSubmit);
+        cancelReport.setVisible(canSubmit);
+        startWork.setVisible(!canSubmit);
         layout.show(cards, "account");
         frame.getRootPane().setDefaultButton(canSubmit ? submit : null);
         frame.setSize(800, 620);

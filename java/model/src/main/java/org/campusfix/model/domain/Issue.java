@@ -1,9 +1,11 @@
 package org.campusfix.model.domain;
 
 public record Issue(long id, long reporterId, long categoryId, String title,
-                    String description, String location, Status status) {
+                    String description, String location, Status status, String resolutionNote) {
     public enum Status {
         OPEN,
+        IN_PROGRESS,
+        RESOLVED,
         CANCELLED
     }
 
@@ -24,7 +26,11 @@ public record Issue(long id, long reporterId, long categoryId, String title,
                 requireText(title, "Title", 120),
                 requireText(description, "Description", 2000),
                 requireText(location, "Location", 120),
-                Status.OPEN);
+                Status.OPEN, null);
+    }
+
+    public static String requireResolutionNote(String note) {
+        return requireText(note, "Resolution note", 2000);
     }
 
     private static String requireText(String text, String field, int maxLength) {
