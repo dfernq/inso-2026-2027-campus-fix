@@ -7,7 +7,7 @@ from typing import TypeVar
 import psycopg
 
 from campusfix.model.auth.authentication_service import AuthenticationService
-from campusfix.model.domain.issue import Issue
+from campusfix.model.domain.issue import Status
 from campusfix.model.domain.user import Role, User
 from campusfix.model.persistence.database_connection import DatabaseConnection
 from campusfix.model.reports.issue_service import IssueService
@@ -32,12 +32,16 @@ class CampusFixController:
         self._view = CampusFixView(self._window)
         self._worker = ThreadPoolExecutor(max_workers=1)
         self._signed_in_user: User | None = None
+        self._editing_report_id: int | None = None
         self._pending_callback: str | None = None
         self._view.on_sign_in(self._sign_in)
         self._view.on_check(self._check_connection)
         self._view.on_sign_out(self._sign_out)
         self._view.on_refresh(self._load_reports)
-        self._view.on_submit_report(self._submit_report)
+        self._view.on_submit_report(self._save_report)
+        self._view.on_edit_report(self._begin_edit)
+        self._view.on_cancel_report(self._cancel_report)
+        self._view.on_discard_edit(self._discard_edit)
         self._window.protocol("WM_DELETE_WINDOW", self._close_window)
 
     def start(self) -> None:
@@ -76,35 +80,37 @@ class CampusFixController:
     def _sign_out(self) -> None:
         self._cancel_pending_callback()
         self._signed_in_user = None
+        self._editing_report_id = None
         self._view.show_sign_in()
 
-    def _load_reports(self, *, submitted: bool = False) -> None:
+    def _load_reports(self, *, change_message: str | None = None) -> None:
         user = self._signed_in_user
         if user is None:
             return
-        message = (
-            "Report submitted. Refreshing..." if submitted else "Loading reports..."
-        )
+        message = f"{change_message} Refreshing..." if change_message else "Loading reports..."
         self._view.show_report_status(message, busy=True)
         result = self._worker.submit(self._report_data, user)
         self._when_ready(
             result,
-            lambda completed: self._complete_report_load(completed, submitted=submitted),
+            lambda completed: self._complete_report_load(completed, change_message),
         )
 
     def _report_data(self, user: User) -> tuple[list[ReportRow], list[CategoryOption]]:
         rows = []
         for report in self._reports.list(user):
             issue = report.issue
+            can_manage = user.role is Role.REGULAR and issue.status is Status.OPEN
             rows.append(
                 ReportRow(
                     issue.id,
                     issue.title,
+                    issue.category_id,
                     report.category_name,
                     issue.location,
                     report.reporter_name,
                     issue.status.value,
                     issue.description,
+                    can_manage,
                 )
             )
 
@@ -119,55 +125,101 @@ class CampusFixController:
     def _complete_report_load(
         self,
         result: Future[tuple[list[ReportRow], list[CategoryOption]]],
-        *,
-        submitted: bool,
+        change_message: str | None,
     ) -> None:
         try:
             rows, categories = result.result()
         except psycopg.Error:
             logger.exception("Loading reports failed.")
             message = (
-                "Report submitted. Could not refresh reports."
-                if submitted
+                f"{change_message} Could not refresh reports."
+                if change_message
                 else "Could not load reports. Try Refresh."
             )
         else:
             self._view.show_reports(rows)
             self._view.show_categories(categories)
-            if submitted:
-                message = "Report submitted."
-            else:
-                message = "Reports up to date." if rows else "No reports yet."
+            message = change_message or ("Reports up to date." if rows else "No reports yet.")
         self._view.show_report_status(message, busy=False)
 
-    def _submit_report(self) -> None:
+    def _begin_edit(self) -> None:
+        report = self._view.selected_report()
+        if report is None or not report.can_manage:
+            return
+        self._editing_report_id = report.id
+        self._view.show_report_for_editing(report)
+
+    def _discard_edit(self) -> None:
+        self._editing_report_id = None
+        self._view.clear_report_form()
+
+    def _save_report(self) -> None:
         user = self._signed_in_user
         if user is None:
             return
+        issue_id = self._editing_report_id
         category_id = self._view.report_category_id()
         title = self._view.report_title()
         description = self._view.report_description()
         location = self._view.report_location()
-        self._view.show_report_status("Submitting report...", busy=True)
-        result = self._worker.submit(
-            self._reports.submit, user, category_id, title, description, location
-        )
-        self._when_ready(result, self._complete_submit)
 
-    def _complete_submit(self, result: Future[Issue]) -> None:
+        if issue_id is None:
+            self._view.show_report_status("Submitting report...", busy=True)
+            result = self._worker.submit(
+                self._reports.submit, user, category_id, title, description, location
+            )
+            message = "Report submitted."
+        else:
+            self._view.show_report_status("Saving report...", busy=True)
+            result = self._worker.submit(
+                self._reports.edit, user, issue_id, category_id, title, description, location
+            )
+            message = "Report updated."
+
+        self._when_ready(
+            result,
+            lambda completed: self._complete_report_change(
+                completed, message, "Could not save the report.", clear_form=True
+            ),
+        )
+
+    def _cancel_report(self) -> None:
+        user = self._signed_in_user
+        report = self._view.selected_report()
+        if user is None or report is None:
+            return
+        if not report.can_manage or not self._view.confirm_cancellation(report.id):
+            return
+
+        self._view.show_report_status("Cancelling report...", busy=True)
+        result = self._worker.submit(self._reports.cancel, user, report.id)
+        self._when_ready(
+            result,
+            lambda completed: self._complete_report_change(
+                completed,
+                "Report cancelled.",
+                "Could not cancel the report.",
+                clear_form=self._editing_report_id == report.id,
+            ),
+        )
+
+    def _complete_report_change(
+        self, result: Future[T], message: str, failure_message: str, *, clear_form: bool
+    ) -> None:
         try:
             result.result()
         except ValueError as error:
             self._view.show_report_status(str(error), busy=False)
             return
         except psycopg.Error:
-            logger.exception("Submitting report failed.")
-            self._view.show_report_status("Could not submit the report.", busy=False)
+            logger.exception(failure_message)
+            self._view.show_report_status(failure_message, busy=False)
             return
 
-        self._view.show_report_status("Report submitted.", busy=False)
-        self._view.clear_report_form()
-        self._load_reports(submitted=True)
+        self._view.show_report_status(message, busy=False)
+        if clear_form:
+            self._discard_edit()
+        self._load_reports(change_message=message)
 
     def _check_connection(self) -> None:
         self._view.show_status("Checking PostgreSQL...", busy=True)

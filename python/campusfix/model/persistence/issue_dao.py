@@ -68,6 +68,36 @@ class IssueDao(CrudDao[Issue]):
             cursor.execute("DELETE FROM issues WHERE id = %s", (entity_id,))
             return cursor.rowcount == 1
 
+    def update_open(self, issue: Issue) -> bool:
+        query = """
+            UPDATE issues
+            SET category_id = category.id, title = %s, description = %s, location = %s
+            FROM categories category
+            WHERE issues.id = %s AND issues.reporter_id = %s
+              AND issues.status = 'OPEN'
+              AND category.id = %s AND category.active
+        """
+        parameters = (
+            issue.title,
+            issue.description,
+            issue.location,
+            issue.id,
+            issue.reporter_id,
+            issue.category_id,
+        )
+        with self._database.get_connection().cursor() as cursor:
+            cursor.execute(query, parameters)
+            return cursor.rowcount == 1
+
+    def cancel_open(self, issue_id: int, reporter_id: int) -> bool:
+        query = """
+            UPDATE issues SET status = 'CANCELLED'
+            WHERE id = %s AND reporter_id = %s AND status = 'OPEN'
+        """
+        with self._database.get_connection().cursor() as cursor:
+            cursor.execute(query, (issue_id, reporter_id))
+            return cursor.rowcount == 1
+
     def find_all(self) -> list[IssueSummary]:
         return self._query_reports(f"{_REPORT_QUERY} ORDER BY i.id DESC", ())
 

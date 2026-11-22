@@ -1,7 +1,8 @@
 # Python desktop client
 
 The Tkinter client lets regular users submit maintenance reports and review
-their own reports. Administrators can review reports from all users.
+their own reports. They can edit or cancel a report while it is open.
+Administrators can review reports from all users.
 
 ## Changesets
 
@@ -29,6 +30,16 @@ start in `OPEN`. `IssueService` checks who can submit and selects the report lis
 for the signed-in role. `IssueDao` and `CategoryDao` implement `CrudDao` and use
 parameterized queries to persist reports and categories. The list shows the
 reporter and category name alongside each report.
+
+### Edit and cancel open reports
+
+Regular users can edit or cancel their own open reports. Editing uses the same
+field validation as submission and requires an active category. Cancellation
+sets the report to `CANCELLED` and keeps it visible in report lists.
+
+`IssueService` checks the account role. The update statements check the
+reporter and current status in PostgreSQL so an action from an older screen
+cannot edit or cancel a report after its status changes.
 
 ## Architecture
 
@@ -62,7 +73,7 @@ classDiagram
 
 The entry point creates a `DatabaseConnection` and passes it to the three DAOs.
 The Controller creates the View and binds callbacks for account actions, report
-submission, refresh, and the connection check. The View renders the forms and
+actions, refresh, and the connection check. The View renders the forms and
 report list and forwards actions through those callbacks.
 
 The Controller runs database work on one worker and updates the View on the
@@ -77,7 +88,7 @@ Use Python 3.10 or newer with Tkinter. Run `python3 -m tkinter` to check that Tk
 is available. Some Python distributions package Tkinter separately.
 
 From the repository root, configure `.env` from `.env.example`. With Docker
-running, start PostgreSQL and apply the account and maintenance-report migrations.
+running, start PostgreSQL and apply the migrations in order.
 
 ```sh
 docker compose up -d --wait &&
@@ -86,11 +97,15 @@ docker compose exec -T database sh -c \
   < database/002-accounts.sql &&
 docker compose exec -T database sh -c \
   'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
-  < database/003-maintenance-reports.sql
+  < database/003-maintenance-reports.sql &&
+docker compose exec -T database sh -c \
+  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
+  < database/004-report-cancellation.sql
 ```
 
-You can rerun both migrations. `003-maintenance-reports.sql` creates the issue
-and category tables and seeds the initial categories.
+`003-maintenance-reports.sql` creates the issue and category tables and seeds the
+initial categories. `004-report-cancellation.sql` allows reports to be marked
+`CANCELLED`. The scripts are safe to rerun.
 
 ```sh
 cd python
@@ -110,10 +125,10 @@ On Windows, use `py -3` to create the environment and activate it with
 | `admin` | `admin-demo` | Administrator |
 
 These sample accounts are for local development databases. Sign in as
-`alice` or `bob` to submit a report under **My reports**. Sign in as `admin` to
-see **All reports**. Select a row to read its description and use **Refresh**
-to load changes from another session. The sign-in screen offers **Check
-database connection**.
+`alice` or `bob` to submit a report under **My reports**. Select an open report
+and choose **Edit report** to load it into the form, or choose **Cancel report**
+and confirm to mark it `CANCELLED`. Sign in as `admin` to see **All reports**.
+Use **Refresh** to load changes from another session.
 
 The connection uses `CAMPUSFIX_DB_URL`, `CAMPUSFIX_DB_USER`, and
 `CAMPUSFIX_DB_PASSWORD`. Process environment variables override file settings.
@@ -130,7 +145,7 @@ python -m unittest discover -s tests
 
 For the integration tests, set `CAMPUSFIX_TEST_DB_URL` in `.env` to the JDBC URL
 for `campusfix_test`. The tests require a separate database whose name ends
-in `_test`. With PostgreSQL running, apply both migrations from the repository root.
+in `_test`. With PostgreSQL running, apply the migrations from the repository root.
 
 ```sh
 docker compose exec -T database sh -c \
@@ -138,7 +153,10 @@ docker compose exec -T database sh -c \
   < database/002-accounts.sql &&
 docker compose exec -T database sh -c \
   'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix_test' \
-  < database/003-maintenance-reports.sql
+  < database/003-maintenance-reports.sql &&
+docker compose exec -T database sh -c \
+  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix_test' \
+  < database/004-report-cancellation.sql
 ```
 
 Then run the integration suite from `python/` with the virtual environment active.
@@ -149,4 +167,4 @@ python -m unittest discover -s tests/integration
 
 The unit tests cover report validation, password checking, and database settings.
 The integration tests cover connection handling, account CRUD, sign-in, report
-visibility by role, and active-category checks.
+visibility by role, active-category checks, and edit and cancellation permissions.

@@ -24,11 +24,13 @@ class Issue:
         title: str | None,
         description: str | None,
         location: str | None,
+        *,
+        issue_id: int = 0,
     ) -> "Issue":
         if category_id <= 0:
             raise ValueError("Select a category.")
         return Issue(
-            0,
+            issue_id,
             reporter_id,
             category_id,
             _require_text(title, "Title", 120),

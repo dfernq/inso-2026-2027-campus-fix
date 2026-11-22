@@ -21,12 +21,37 @@ class IssueService:
         description: str,
         location: str,
     ) -> Issue:
-        if reporter.role is not Role.REGULAR:
-            raise ValueError("Only regular users can submit reports.")
+        self._require_regular_user(reporter)
         issue = Issue.open(reporter.id, category_id, title, description, location)
         return self._issues.create(issue)
+
+    def edit(
+        self,
+        reporter: User,
+        issue_id: int,
+        category_id: int,
+        title: str,
+        description: str,
+        location: str,
+    ) -> None:
+        self._require_regular_user(reporter)
+        issue = Issue.open(
+            reporter.id, category_id, title, description, location, issue_id=issue_id
+        )
+        if not self._issues.update_open(issue):
+            raise ValueError("Edit an open report you submitted and select an active category.")
+
+    def cancel(self, reporter: User, issue_id: int) -> None:
+        self._require_regular_user(reporter)
+        if not self._issues.cancel_open(issue_id, reporter.id):
+            raise ValueError("Only your open reports can be cancelled.")
 
     def list(self, viewer: User) -> list[IssueSummary]:
         if viewer.role is Role.ADMIN:
             return self._issues.find_all()
         return self._issues.find_by_reporter(viewer.id)
+
+    @staticmethod
+    def _require_regular_user(user: User) -> None:
+        if user.role is not Role.REGULAR:
+            raise ValueError("Only regular users can submit, edit, or cancel reports.")

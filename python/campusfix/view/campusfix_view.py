@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
-from tkinter import Text, Tk, ttk
+from tkinter import Text, Tk, messagebox, ttk
 
 
 @dataclass(frozen=True)
@@ -13,11 +13,13 @@ class CategoryOption:
 class ReportRow:
     id: int
     title: str
+    category_id: int
     category: str
     location: str
     reporter: str
     status: str
     description: str
+    can_manage: bool
 
 
 class CampusFixView:
@@ -25,7 +27,8 @@ class CampusFixView:
         self._window = window
         window.title("CampusFix")
         self._categories: list[CategoryOption] = []
-        self._report_descriptions: dict[str, str] = {}
+        self._displayed_reports: dict[str, ReportRow] = {}
+        self._report_busy = False
 
         content = ttk.Frame(window, padding=24)
         content.pack(fill="both", expand=True)
@@ -91,7 +94,7 @@ class CampusFixView:
         scrollbar = ttk.Scrollbar(table, orient="vertical", command=self._reports.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self._reports.configure(yscrollcommand=scrollbar.set)
-        self._reports.bind("<<TreeviewSelect>>", lambda _event: self._show_description())
+        self._reports.bind("<<TreeviewSelect>>", lambda _event: self._show_selected_report())
 
         details = ttk.LabelFrame(self._account_panel, text="Report description", padding=8)
         details.pack(fill="x", pady=(8, 0))
@@ -99,6 +102,14 @@ class CampusFixView:
             details, height=3, wrap="word", state="disabled"
         )
         self._selected_description.pack(fill="x")
+
+        self._report_actions = ttk.Frame(self._account_panel)
+        self._edit_button = ttk.Button(self._report_actions, text="Edit report", state="disabled")
+        self._edit_button.pack(side="left")
+        self._cancel_report_button = ttk.Button(
+            self._report_actions, text="Cancel report", state="disabled"
+        )
+        self._cancel_report_button.pack(side="left", padx=(8, 0))
 
     def _create_report_form(self) -> None:
         self._report_form = ttk.LabelFrame(
@@ -120,8 +131,11 @@ class CampusFixView:
             ttk.Label(self._report_form, text=label).grid(row=row, column=0, sticky="nw")
             field.grid(row=row, column=1, sticky="ew", padx=(12, 0), pady=(0, 4))
 
-        self._submit_button = ttk.Button(self._report_form, text="Submit report")
-        self._submit_button.grid(row=4, column=0, columnspan=2, sticky="w")
+        actions = ttk.Frame(self._report_form)
+        actions.grid(row=4, column=0, columnspan=2, sticky="w")
+        self._submit_button = ttk.Button(actions, text="Submit report")
+        self._submit_button.pack(side="left")
+        self._discard_edit_button = ttk.Button(actions, text="Discard edit")
 
     def on_sign_in(self, action: Callable[[], None]) -> None:
         self._sign_in_button.configure(command=action)
@@ -139,6 +153,15 @@ class CampusFixView:
 
     def on_submit_report(self, action: Callable[[], None]) -> None:
         self._submit_button.configure(command=action)
+
+    def on_edit_report(self, action: Callable[[], None]) -> None:
+        self._edit_button.configure(command=action)
+
+    def on_cancel_report(self, action: Callable[[], None]) -> None:
+        self._cancel_report_button.configure(command=action)
+
+    def on_discard_edit(self, action: Callable[[], None]) -> None:
+        self._discard_edit_button.configure(command=action)
 
     def username(self) -> str:
         return self._username.get()
@@ -170,6 +193,7 @@ class CampusFixView:
         return self._categories[index].id if index >= 0 else 0
 
     def show_report_status(self, message: str, *, busy: bool) -> None:
+        self._report_busy = busy
         self._report_status.configure(text=message)
         state = "disabled" if busy else "normal"
         self._refresh_button.configure(state=state)
@@ -178,6 +202,8 @@ class CampusFixView:
         self._report_location.configure(state=state)
         self._report_description.configure(state=state)
         self._report_category.configure(state="disabled" if busy else "readonly")
+        self._discard_edit_button.configure(state=state)
+        self._update_report_actions()
 
     def show_categories(self, categories: list[CategoryOption]) -> None:
         selected_id = self.report_category_id()
@@ -191,26 +217,67 @@ class CampusFixView:
                 break
 
     def show_reports(self, rows: list[ReportRow]) -> None:
+        selection = self._reports.selection()
+        selected_id = selection[0] if selection else ""
         self._reports.delete(*self._reports.get_children())
-        self._report_descriptions = {str(row.id): row.description for row in rows}
+        self._displayed_reports = {str(row.id): row for row in rows}
         for row in rows:
             values = (
                 row.id, row.title, row.category, row.location, row.reporter, row.status
             )
             self._reports.insert("", "end", iid=str(row.id), values=values)
         if rows:
-            self._reports.selection_set(str(rows[0].id))
-        self._show_description()
+            if selected_id not in self._displayed_reports:
+                selected_id = str(rows[0].id)
+            self._reports.selection_set(selected_id)
+            self._reports.see(selected_id)
+        self._show_selected_report()
 
-    def _show_description(self) -> None:
+    def selected_report(self) -> ReportRow | None:
         selection = self._reports.selection()
-        description = self._report_descriptions.get(selection[0], "") if selection else ""
+        return self._displayed_reports.get(selection[0]) if selection else None
+
+    def _show_selected_report(self) -> None:
+        report = self.selected_report()
+        description = report.description if report is not None else ""
         self._selected_description.configure(state="normal")
         self._selected_description.delete("1.0", "end")
         self._selected_description.insert("1.0", description)
         self._selected_description.configure(state="disabled")
+        self._update_report_actions()
+
+    def _update_report_actions(self) -> None:
+        report = self.selected_report()
+        manageable = report is not None and report.can_manage
+        enabled = manageable and not self._report_busy
+        state = "normal" if enabled else "disabled"
+        self._edit_button.configure(state=state)
+        self._cancel_report_button.configure(state=state)
+
+    def show_report_for_editing(self, report: ReportRow) -> None:
+        self.clear_report_form()
+        self._report_form.configure(text=f"Edit report #{report.id}")
+        self._submit_button.configure(text="Save changes")
+        self._discard_edit_button.pack(side="left", padx=(8, 0))
+        self._report_title.insert(0, report.title)
+        self._report_location.insert(0, report.location)
+        self._report_description.insert("1.0", report.description)
+        for index, category in enumerate(self._categories):
+            if category.id == report.category_id:
+                self._report_category.current(index)
+                break
+        self._report_title.focus_set()
+
+    def confirm_cancellation(self, issue_id: int) -> bool:
+        return messagebox.askyesno(
+            "Cancel report", f"Cancel report #{issue_id}?",
+            default=messagebox.NO, parent=self._window,
+        )
 
     def clear_report_form(self) -> None:
+        self._report_form.configure(text="New maintenance report")
+        self._submit_button.configure(text="Submit report")
+        self._discard_edit_button.pack_forget()
         self._report_title.delete(0, "end")
         self._report_location.delete(0, "end")
         self._report_description.delete("1.0", "end")
@@ -237,8 +304,10 @@ class CampusFixView:
         list_title = "My reports" if can_submit else "All reports"
         self._report_list_title.configure(text=list_title)
         if can_submit:
+            self._report_actions.pack(fill="x", pady=(8, 0), before=self._report_status)
             self._report_form.pack(fill="x", pady=(8, 0), before=self._report_status)
         else:
+            self._report_actions.pack_forget()
             self._report_form.pack_forget()
         self._account_panel.pack(fill="both", expand=True)
         self._window.minsize(660, 560)
