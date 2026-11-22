@@ -61,6 +61,25 @@ Administrators can add, rename, deactivate, and reactivate categories.
 category ID and display the current name, including when the category is
 inactive. Report forms offer active categories.
 
+### Share the desktop database using Singleton
+
+The Singleton gives the desktop process one place to get its database
+connection manager. Repeated startup requests reuse that manager and its
+settings, avoiding separate PostgreSQL sessions with separate lifecycles.
+
+`desktop_database.get_instance()` uses a lock so concurrent callers can
+initialize the manager only once. The first call reads the root `.env`. The
+manager opens the Psycopg connection when the Controller first needs it.
+
+The entry point passes the manager to the Controller and DAOs. Integration
+tests can still supply their own manager configured for `campusfix_test`.
+
+### Launch the desktop client
+
+`python/run.sh` creates or reuses the virtual environment, installs the required
+packages, starts PostgreSQL, applies the application migrations, and opens the
+Tkinter client.
+
 ## Architecture
 
 ```mermaid
@@ -69,8 +88,12 @@ classDiagram
     class CrudDao {
         <<interface>>
     }
+    class desktop_database {
+        <<module>>
+    }
     Main ..> CampusFixController : creates
-    Main ..> DatabaseConnection : creates
+    Main ..> desktop_database : gets instance
+    desktop_database --> DatabaseConnection : shared manager
     Main ..> AuthenticationService : creates
     Main ..> UserDao : creates
     Main ..> IssueService : creates
@@ -95,10 +118,11 @@ classDiagram
     CrudDao <|.. CategoryDao
 ```
 
-The entry point creates a `DatabaseConnection` and passes it to the three DAOs.
-The Controller creates the View and binds callbacks for account, report, and
-category actions, refresh, and the connection check. The View renders the
-forms and lists and forwards actions through those callbacks.
+The entry point gets the shared `DatabaseConnection` from `desktop_database`
+and passes it to the Controller and the three DAOs. The Controller creates
+the View and binds callbacks for account, report, and category actions,
+refresh, and the connection check. The View renders the forms and lists and
+forwards actions through those callbacks.
 
 The Controller runs database work on one worker and updates the View on the
 Tkinter event thread. The Model opens a connection on first use and reuses it in
@@ -111,40 +135,22 @@ lost.
 Use Python 3.10 or newer with Tkinter. Run `python3 -m tkinter` to check that Tk
 is available. Some Python distributions package Tkinter separately.
 
-From the repository root, configure `.env` from `.env.example`. With Docker
-running, start PostgreSQL and apply the migrations in order.
+Configure the root `.env` from `.env.example` and start Docker. From the
+repository root, run the launcher in Bash or Zsh. On Windows, use Git Bash
+with the Python launcher (`py`).
 
 ```sh
-docker compose up -d --wait &&
-docker compose exec -T database sh -c \
-  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
-  < database/002-accounts.sql &&
-docker compose exec -T database sh -c \
-  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
-  < database/003-maintenance-reports.sql &&
-docker compose exec -T database sh -c \
-  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
-  < database/004-report-cancellation.sql &&
-docker compose exec -T database sh -c \
-  'psql -v ON_ERROR_STOP=1 -U "$CAMPUSFIX_DB_USER" -d campusfix' \
-  < database/005-report-resolution.sql
+bash python/run.sh
 ```
 
-`003-maintenance-reports.sql` creates the issue and category tables and seeds the
-initial categories when the category table is empty. `004-report-cancellation.sql`
-allows reports to be marked `CANCELLED`. `005-report-resolution.sql` adds the two
-work statuses and the resolution note. The scripts are safe to rerun.
+The launcher creates `python/.venv` on first run and reuses it on later runs.
+To select a specific Python version, create that environment with the desired
+interpreter before running the launcher.
 
-```sh
-cd python
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m campusfix
-```
-
-On Windows, use `py -3` to create the environment and activate it with
-`.venv\Scripts\activate` from Command Prompt.
+The launcher applies the migrations through `005-report-resolution.sql` to
+`campusfix`. The migrations preserve existing reports and categories when
+rerun. The launcher uses the virtual environment directly, so activation is
+optional.
 
 | Username | Password | Role |
 | --- | --- | --- |
@@ -170,7 +176,9 @@ prefix before passing it to Psycopg.
 
 ## Verification
 
-With the virtual environment active, run the unit tests from `python/`.
+Run the unit tests from `python/` with the virtual environment active.
+On macOS or Linux, activate it with `source .venv/bin/activate`. On Windows,
+use `.venv\Scripts\activate` from Command Prompt.
 
 ```sh
 python -m unittest discover -s tests

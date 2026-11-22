@@ -13,12 +13,11 @@ repository root to start PostgreSQL, apply the migrations, and open the client.
 bash java/run.sh
 ```
 
-For Python, [apply the migrations and set up the virtual environment](docs/python-desktop.md#run-locally).
-Then run the desktop client.
+For Python, start Docker and use Python 3.10 or newer with Tkinter. The launcher
+sets up the virtual environment, applies the migrations, and opens the client.
 
 ```sh
-cd python
-python -m campusfix
+bash python/run.sh
 ```
 
 For Android, see the [Android guide](docs/android.md) for device setup and launch.
