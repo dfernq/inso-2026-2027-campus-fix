@@ -1,7 +1,8 @@
 # Android client
 
 The Android client lets regular users submit maintenance reports and review
-their own reports. Administrators can review reports from all users.
+their own reports. They can edit or cancel a report while it is open.
+Administrators can review reports from all users.
 
 ## Changesets
 
@@ -22,6 +23,16 @@ Regular users submit a title, location, category, and description. New reports
 start in `OPEN`. The ViewModel loads active categories for the report form and
 publishes the report list for the signed-in account. **Refresh** loads changes
 from other sessions.
+
+### Edit and cancel open reports
+
+Regular users can edit or cancel their own open reports. **Edit report** loads
+the report into the form. **Discard edit** returns to a blank form. Cancelling
+a report keeps it visible with status `CANCELLED`.
+
+`IssueService` validates edited fields and checks the account role. The
+update statements check the reporter and current status in PostgreSQL, so
+changes from a stale screen are rejected after the report is cancelled.
 
 ## Architecture
 
@@ -49,8 +60,8 @@ classDiagram
 ```
 
 - **View.** `MainActivity` reads the forms, forwards actions, and renders the
-  ViewModel's state. The Activity keeps the report draft across rotation and
-  clears it after a successful submission or sign-out. It obtains the
+  ViewModel's state. The Activity keeps the draft and its report ID across
+  rotation and clears them after saving, cancelling that report, or signing out. It obtains the
   ViewModel through `ViewModelProvider` and the application factory.
 - **ViewModel.** `CampusFixViewModel` owns the account, reports, category options,
   and operation status. Its `state()` method exposes `LiveData<State>` for the
@@ -58,7 +69,7 @@ classDiagram
   ViewModel serves the recreated Activity after rotation. One worker runs
   database operations and closes the connection when the ViewModel is cleared.
 - **Model.** `AuthenticationService` verifies credentials, and `IssueService`
-  validates submissions and selects reports by role. The DAOs implement
+  validates report changes and selects reports by role. The DAOs implement
   `CrudDao` with parameterized JDBC queries. `DatabaseConnection` opens and
   reuses an autocommit connection.
 
@@ -94,9 +105,9 @@ The launcher reuses a connected device or starts the only configured emulator.
 If you have several emulator profiles, start the one you want first or set
 `campusfix.avd` to its name in `android/local.properties`.
 
-Each run starts or reuses PostgreSQL and applies
-`database/002-accounts.sql` and `database/003-maintenance-reports.sql`.
-Both scripts preserve existing accounts and reports. The
+Each run starts or reuses PostgreSQL and applies the account, maintenance
+report, and cancellation migrations through `database/004-report-cancellation.sql`.
+The scripts preserve existing accounts and reports. The
 launcher installs the app, forwards the database port, and replaces the app's
 private connection settings before opening it. A failed step returns you to
 your terminal. Emulator startup output goes to `android/build/emulator.log`.
@@ -111,11 +122,12 @@ These sample accounts are for local development databases.
 
 ## Verification
 
-Submit a report as `alice` and verify that it appears under **My reports**.
-Rotate the device to confirm the report stays visible. Tap **Sign out**, then
-sign in as `bob` and confirm that Alice’s report is absent. Sign in as `admin`
-to find it under **All reports**. Use **Check database connection** on the
-sign-in screen to verify PostgreSQL access.
+Submit a report as `alice`. Open it with **Edit report**, change the title, and
+rotate the device. Check that the edit still targets the same report, then
+save and cancel it. Confirm that the list shows `CANCELLED`. Sign in as `bob`
+to confirm the report is absent, then as `admin` to find it under **All reports**.
+Use **Check database connection** on the sign-in screen to verify PostgreSQL
+access.
 
 The debug build keeps credentials out of the APK and Git. Use this client with
 a trusted local development database. An established connection is not recovered

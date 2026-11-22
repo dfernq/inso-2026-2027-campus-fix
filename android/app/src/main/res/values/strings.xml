@@ -33,8 +33,22 @@
     <string name="reports_load_failed">Could not load reports. Try Refresh.</string>
     <string name="report_submitting">Submitting report…</string>
     <string name="report_submitted">Report submitted.</string>
-    <string name="report_submit_failed">Could not submit the report.</string>
+    <string name="report_save_failed">Could not save the report.</string>
     <string name="report_submitted_refresh_failed">Report submitted. Could not refresh reports.</string>
     <string name="report_row_title">#%1$d %2$s</string>
     <string name="report_row_details">%1$s · %2$s\nReported by %3$s · %4$s</string>
+    <string name="edit_report">Edit report</string>
+    <string name="edit_report_heading">Edit report #%1$d</string>
+    <string name="save_report_changes">Save changes</string>
+    <string name="discard_report_edit">Discard edit</string>
+    <string name="cancel_report">Cancel report</string>
+    <string name="keep_report">Keep report</string>
+    <string name="confirm_cancel_report">Cancel report #%1$d?</string>
+    <string name="report_saving">Saving report…</string>
+    <string name="report_updated">Report updated.</string>
+    <string name="report_updated_refresh_failed">Report updated. Could not refresh reports.</string>
+    <string name="report_cancelling">Cancelling report…</string>
+    <string name="report_cancelled">Report cancelled.</string>
+    <string name="report_cancel_failed">Could not cancel the report.</string>
+    <string name="report_cancelled_refresh_failed">Report cancelled. Could not refresh reports.</string>
 </resources>

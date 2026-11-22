@@ -1,5 +1,6 @@
 package org.campusfix.android.view;
 
+import android.app.AlertDialog;
 import android.os.Bundle;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
@@ -7,6 +8,7 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 import androidx.activity.ComponentActivity;
@@ -30,8 +32,12 @@ public final class MainActivity extends ComponentActivity {
     private static final String DRAFT_LOCATION = "draftLocation";
     private static final String DRAFT_DESCRIPTION = "draftDescription";
     private static final String DRAFT_CATEGORY = "draftCategory";
-    private static final String RENDERED_SUBMISSION = "renderedSubmission";
+    private static final String DRAFT_ISSUE = "draftIssue";
+    private static final String RENDERED_SAVE_COUNT = "renderedSaveCount";
 
+    private CampusFixViewModel viewModel;
+    private AlertDialog cancellationDialog;
+    private ScrollView screen;
     private View signInForm;
     private EditText username;
     private EditText password;
@@ -46,16 +52,19 @@ public final class MainActivity extends ComponentActivity {
     private LinearLayout reportList;
     private Button refresh;
     private View reportForm;
+    private TextView reportFormHeading;
     private EditText reportTitle;
     private EditText reportLocation;
     private EditText reportDescription;
     private Spinner reportCategory;
     private Button submit;
+    private Button discardEdit;
     private ArrayAdapter<String> categoryNames;
     private List<CategoryOption> displayedCategories = List.of();
     private List<ReportDisplay> displayedReports = List.of();
     private long restoredCategoryId;
-    private long renderedSubmissionId;
+    private long editingIssueId;
+    private long renderedSaveCount;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -67,13 +76,14 @@ public final class MainActivity extends ComponentActivity {
         restoreDraft(savedInstanceState);
 
         var application = (CampusFixApplication) getApplication();
-        var viewModel = new ViewModelProvider(this, application.viewModelFactory())
+        viewModel = new ViewModelProvider(this, application.viewModelFactory())
                 .get(CampusFixViewModel.class);
-        bindActions(viewModel);
+        bindActions();
         viewModel.state().observe(this, this::render);
     }
 
     private void bindViews() {
+        screen = findViewById(R.id.screen);
         signInForm = findViewById(R.id.sign_in_form);
         username = findViewById(R.id.username);
         password = findViewById(R.id.password);
@@ -88,11 +98,13 @@ public final class MainActivity extends ComponentActivity {
         reportList = findViewById(R.id.report_list);
         refresh = findViewById(R.id.refresh_reports);
         reportForm = findViewById(R.id.report_form);
+        reportFormHeading = findViewById(R.id.report_form_heading);
         reportTitle = findViewById(R.id.report_title);
         reportLocation = findViewById(R.id.report_location);
         reportDescription = findViewById(R.id.report_description);
         reportCategory = findViewById(R.id.report_category);
         submit = findViewById(R.id.submit_report);
+        discardEdit = findViewById(R.id.discard_edit);
 
         categoryNames = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item);
         categoryNames.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
@@ -100,7 +112,7 @@ public final class MainActivity extends ComponentActivity {
         reportCategory.setAdapter(categoryNames);
     }
 
-    private void bindActions(CampusFixViewModel viewModel) {
+    private void bindActions() {
         signIn.setOnClickListener(view -> {
             String enteredUsername = username.getText().toString();
             char[] enteredPassword = takePassword();
@@ -122,8 +134,12 @@ public final class MainActivity extends ComponentActivity {
         refresh.setOnClickListener(view -> viewModel.refreshReports());
         submit.setOnClickListener(view -> {
             hideKeyboard(reportDescription);
-            viewModel.submitReport(selectedCategoryId(), reportTitle.getText().toString(),
+            viewModel.saveReport(editingIssueId, selectedCategoryId(), reportTitle.getText().toString(),
                     reportDescription.getText().toString(), reportLocation.getText().toString());
+        });
+        discardEdit.setOnClickListener(view -> {
+            hideKeyboard(reportDescription);
+            clearDraft();
         });
     }
 
@@ -158,9 +174,9 @@ public final class MainActivity extends ComponentActivity {
 
         accountPanel.setVisibility(View.GONE);
         clearDraft();
-        renderedSubmissionId = 0;
+        renderedSaveCount = 0;
         renderCategories(List.of());
-        renderRows(List.of());
+        renderRows(List.of(), false);
 
         status.setText(state.signInStatus().message());
         boolean ready = !state.signInStatus().busy();
@@ -178,12 +194,15 @@ public final class MainActivity extends ComponentActivity {
         reportsTitle.setText(account.canSubmit() ? R.string.my_reports : R.string.all_reports);
         reportForm.setVisibility(account.canSubmit() ? View.VISIBLE : View.GONE);
 
-        if (renderedSubmissionId != reports.submittedIssueId()) {
-            renderedSubmissionId = reports.submittedIssueId();
+        boolean saved = renderedSaveCount != reports.savedDraftCount();
+        boolean draftWasCancelled = editingIssueId != 0 && editingIssueId == reports.cancelledIssueId();
+        if (saved || draftWasCancelled) {
+            renderedSaveCount = reports.savedDraftCount();
             clearDraft();
         }
+        renderDraftMode();
         renderCategories(reports.categories());
-        renderRows(reports.items());
+        renderRows(reports.items(), reports.busy());
         if (reports.validationMessage() == null) {
             reportStatus.setText(reports.message());
         } else {
@@ -196,6 +215,7 @@ public final class MainActivity extends ComponentActivity {
         reportDescription.setEnabled(ready);
         reportCategory.setEnabled(ready);
         submit.setEnabled(ready);
+        discardEdit.setEnabled(ready);
         refresh.setEnabled(ready);
         accountPanel.setVisibility(View.VISIBLE);
     }
@@ -205,21 +225,27 @@ public final class MainActivity extends ComponentActivity {
             return;
         }
         long selectedId = selectedCategoryId();
-        restoredCategoryId = 0;
         var names = new ArrayList<String>();
         names.add(getString(R.string.choose_category));
-        int selectedIndex = 0;
         for (var category : categories) {
             names.add(category.name());
-            if (category.id() == selectedId) {
-                selectedIndex = names.size() - 1;
-            }
         }
 
         displayedCategories = categories;
         categoryNames.clear();
         categoryNames.addAll(names);
-        reportCategory.setSelection(selectedIndex);
+        selectCategory(selectedId);
+    }
+
+    private void selectCategory(long categoryId) {
+        restoredCategoryId = 0;
+        for (int index = 0; index < displayedCategories.size(); index++) {
+            if (displayedCategories.get(index).id() == categoryId) {
+                reportCategory.setSelection(index + 1);
+                return;
+            }
+        }
+        reportCategory.setSelection(0);
     }
 
     private long selectedCategoryId() {
@@ -227,32 +253,78 @@ public final class MainActivity extends ComponentActivity {
         return index > 0 ? displayedCategories.get(index - 1).id() : restoredCategoryId;
     }
 
-    private void renderRows(List<ReportDisplay> reports) {
-        if (displayedReports.equals(reports)) {
-            return;
+    private void renderRows(List<ReportDisplay> reports, boolean busy) {
+        if (!displayedReports.equals(reports)) {
+            displayedReports = reports;
+            reportList.removeAllViews();
+            for (var report : reports) {
+                reportList.addView(createReportRow(report));
+            }
         }
-
-        displayedReports = reports;
-        reportList.removeAllViews();
-        for (var report : reports) {
-            View row = getLayoutInflater().inflate(R.layout.report_row, reportList, false);
-            TextView title = row.findViewById(R.id.report_row_title);
-            TextView details = row.findViewById(R.id.report_row_details);
-            TextView description = row.findViewById(R.id.report_row_description);
-            title.setText(getString(R.string.report_row_title, report.id(), report.title()));
-            details.setText(getString(R.string.report_row_details, report.category(), report.location(),
-                    report.reporter(), report.status()));
-            description.setText(report.description());
-            reportList.addView(row);
+        for (int index = 0; index < reportList.getChildCount(); index++) {
+            View row = reportList.getChildAt(index);
+            row.findViewById(R.id.edit_report).setEnabled(!busy);
+            row.findViewById(R.id.cancel_report).setEnabled(!busy);
         }
     }
 
+    private View createReportRow(ReportDisplay report) {
+        View row = getLayoutInflater().inflate(R.layout.report_row, reportList, false);
+        TextView title = row.findViewById(R.id.report_row_title);
+        TextView details = row.findViewById(R.id.report_row_details);
+        TextView description = row.findViewById(R.id.report_row_description);
+        title.setText(getString(R.string.report_row_title, report.id(), report.title()));
+        details.setText(getString(R.string.report_row_details, report.category(), report.location(),
+                report.reporter(), report.status()));
+        description.setText(report.description());
+
+        View actions = row.findViewById(R.id.report_row_actions);
+        actions.setVisibility(report.canManage() ? View.VISIBLE : View.GONE);
+        row.findViewById(R.id.edit_report).setOnClickListener(view -> showReportForEditing(report));
+        row.findViewById(R.id.cancel_report).setOnClickListener(view -> confirmCancellation(report.id()));
+        return row;
+    }
+
+    private void showReportForEditing(ReportDisplay report) {
+        editingIssueId = report.id();
+        reportTitle.setText(report.title());
+        reportLocation.setText(report.location());
+        reportDescription.setText(report.description());
+        selectCategory(report.categoryId());
+        renderDraftMode();
+        screen.smoothScrollTo(0, accountPanel.getTop() + reportForm.getTop());
+    }
+
+    private void confirmCancellation(long issueId) {
+        cancellationDialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.cancel_report)
+                .setMessage(getString(R.string.confirm_cancel_report, issueId))
+                .setNegativeButton(R.string.keep_report, null)
+                .setPositiveButton(R.string.cancel_report, (dialog, which) -> viewModel.cancelReport(issueId))
+                .show();
+    }
+
+    private void renderDraftMode() {
+        if (editingIssueId == 0) {
+            reportFormHeading.setText(R.string.new_report);
+            submit.setText(R.string.submit_report);
+            discardEdit.setVisibility(View.GONE);
+            return;
+        }
+
+        reportFormHeading.setText(getString(R.string.edit_report_heading, editingIssueId));
+        submit.setText(R.string.save_report_changes);
+        discardEdit.setVisibility(View.VISIBLE);
+    }
+
     private void clearDraft() {
+        editingIssueId = 0;
         reportTitle.getText().clear();
         reportLocation.getText().clear();
         reportDescription.getText().clear();
         restoredCategoryId = 0;
         reportCategory.setSelection(0);
+        renderDraftMode();
     }
 
     private void restoreDraft(Bundle savedInstanceState) {
@@ -263,7 +335,8 @@ public final class MainActivity extends ComponentActivity {
         reportLocation.setText(savedInstanceState.getString(DRAFT_LOCATION, ""));
         reportDescription.setText(savedInstanceState.getString(DRAFT_DESCRIPTION, ""));
         restoredCategoryId = savedInstanceState.getLong(DRAFT_CATEGORY);
-        renderedSubmissionId = savedInstanceState.getLong(RENDERED_SUBMISSION);
+        editingIssueId = savedInstanceState.getLong(DRAFT_ISSUE);
+        renderedSaveCount = savedInstanceState.getLong(RENDERED_SAVE_COUNT);
     }
 
     @Override
@@ -273,6 +346,15 @@ public final class MainActivity extends ComponentActivity {
         outState.putString(DRAFT_LOCATION, reportLocation.getText().toString());
         outState.putString(DRAFT_DESCRIPTION, reportDescription.getText().toString());
         outState.putLong(DRAFT_CATEGORY, selectedCategoryId());
-        outState.putLong(RENDERED_SUBMISSION, renderedSubmissionId);
+        outState.putLong(DRAFT_ISSUE, editingIssueId);
+        outState.putLong(RENDERED_SAVE_COUNT, renderedSaveCount);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (cancellationDialog != null) {
+            cancellationDialog.dismiss();
+        }
+        super.onDestroy();
     }
 }

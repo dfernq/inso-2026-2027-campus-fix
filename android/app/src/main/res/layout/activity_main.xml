@@ -108,6 +108,7 @@
                 android:visibility="gone">
 
                 <TextView
+                    android:id="@+id/report_form_heading"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:accessibilityHeading="true"
@@ -153,12 +154,29 @@
                     android:minLines="2"
                     android:saveEnabled="false" />
 
-                <Button
-                    android:id="@+id/submit_report"
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    style="?android:attr/buttonBarStyle"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:text="@string/submit_report" />
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/submit_report"
+                        style="?android:attr/buttonBarButtonStyle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/submit_report" />
+
+                    <Button
+                        android:id="@+id/discard_edit"
+                        style="?android:attr/buttonBarButtonStyle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:text="@string/discard_report_edit"
+                        android:visibility="gone" />
+                </LinearLayout>
             </LinearLayout>
 
             <TextView

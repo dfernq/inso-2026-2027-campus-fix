@@ -16,6 +16,7 @@ import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 import org.campusfix.android.R;
 import org.campusfix.model.auth.AuthenticationService;
+import org.campusfix.model.domain.Issue;
 import org.campusfix.model.domain.User;
 import org.campusfix.model.persistence.CategoryDao;
 import org.campusfix.model.persistence.DatabaseConnection;
@@ -58,19 +59,29 @@ public final class CampusFixViewModel extends ViewModel {
     public record CategoryOption(long id, String name) {
     }
 
-    public record ReportDisplay(long id, String title, String category, String location,
-                                String reporter, String status, String description) {
+    public record ReportDisplay(long id, String title, long categoryId, String category,
+                                String location, String reporter, String status,
+                                String description, boolean canManage) {
     }
 
     public record ReportsState(List<ReportDisplay> items, List<CategoryOption> categories,
                                int message, String validationMessage, boolean busy,
-                               long submittedIssueId) {
+                               long savedDraftCount, long cancelledIssueId) {
         private ReportsState withStatus(int message, boolean busy) {
-            return new ReportsState(items, categories, message, null, busy, submittedIssueId);
+            return new ReportsState(items, categories, message, null, busy, savedDraftCount, cancelledIssueId);
         }
 
         private ReportsState withValidationMessage(String validationMessage) {
-            return new ReportsState(items, categories, 0, validationMessage, false, submittedIssueId);
+            return new ReportsState(items, categories, 0, validationMessage, false,
+                    savedDraftCount, cancelledIssueId);
+        }
+
+        private ReportsState afterSave() {
+            return new ReportsState(items, categories, message, null, busy, savedDraftCount + 1, cancelledIssueId);
+        }
+
+        private ReportsState afterCancellation(long issueId) {
+            return new ReportsState(items, categories, message, null, busy, savedDraftCount, issueId);
         }
     }
 
@@ -153,7 +164,7 @@ public final class CampusFixViewModel extends ViewModel {
         boolean regular = user.role() == User.Role.REGULAR;
         int title = regular ? R.string.regular_account : R.string.admin_account;
         var account = new AccountDisplay(user.username(), title, regular);
-        var initialReports = new ReportsState(List.of(), List.of(), R.string.reports_loading, null, true, 0);
+        var initialReports = new ReportsState(List.of(), List.of(), R.string.reports_loading, null, true, 0, 0);
         state.setValue(new State(Status.READY, account, initialReports));
         loadReports(user, initialReports);
     }
@@ -167,60 +178,91 @@ public final class CampusFixViewModel extends ViewModel {
         loadReports(signedInUser, reports);
     }
 
-    public void submitReport(long categoryId, String title, String description, String location) {
+    public void saveReport(long issueId, long categoryId, String title, String description, String location) {
         var reports = state.getValue().reports();
         if (reports == null || reports.busy()) {
             return;
         }
 
         var reporter = signedInUser;
-        showReports(reports.withStatus(R.string.report_submitting, true));
+        boolean editing = issueId != 0;
+        int progressMessage = editing ? R.string.report_saving : R.string.report_submitting;
+        showReports(reports.withStatus(progressMessage, true));
         worker.execute(() -> {
             try {
-                var issue = issues().submit(reporter, categoryId, title, description, location);
-                publishReports(reporter, readReports(reporter, reports, issue.id()));
+                if (editing) {
+                    issues().edit(reporter, issueId, categoryId, title, description, location);
+                } else {
+                    issues().submit(reporter, categoryId, title, description, location);
+                }
+                int success = editing ? R.string.report_updated : R.string.report_submitted;
+                int refreshFailure = editing
+                        ? R.string.report_updated_refresh_failed : R.string.report_submitted_refresh_failed;
+                publishReports(reporter, readReports(reporter, reports.afterSave(), success, refreshFailure));
             } catch (IllegalArgumentException exception) {
                 publishReports(reporter, reports.withValidationMessage(exception.getMessage()));
             } catch (SQLException exception) {
-                Log.w(TAG, "Submitting the report failed.", exception);
-                publishReports(reporter, reports.withStatus(R.string.report_submit_failed, false));
+                Log.w(TAG, "Saving the report failed.", exception);
+                publishReports(reporter, reports.withStatus(R.string.report_save_failed, false));
+            }
+        });
+    }
+
+    public void cancelReport(long issueId) {
+        var reports = state.getValue().reports();
+        if (reports == null || reports.busy()) {
+            return;
+        }
+
+        var reporter = signedInUser;
+        showReports(reports.withStatus(R.string.report_cancelling, true));
+        worker.execute(() -> {
+            try {
+                issues().cancel(reporter, issueId);
+                var cancelled = reports.afterCancellation(issueId);
+                publishReports(reporter, readReports(reporter, cancelled,
+                        R.string.report_cancelled, R.string.report_cancelled_refresh_failed));
+            } catch (IllegalArgumentException exception) {
+                publishReports(reporter, reports.withValidationMessage(exception.getMessage()));
+            } catch (SQLException exception) {
+                Log.w(TAG, "Cancelling the report failed.", exception);
+                publishReports(reporter, reports.withStatus(R.string.report_cancel_failed, false));
             }
         });
     }
 
     private void loadReports(User viewer, ReportsState previous) {
-        worker.execute(() -> publishReports(viewer, readReports(viewer, previous, 0)));
+        worker.execute(() -> publishReports(viewer, readReports(viewer, previous, 0, R.string.reports_load_failed)));
     }
 
-    private ReportsState readReports(User viewer, ReportsState previous, long newIssueId) {
-        boolean submitted = newIssueId != 0;
-        long submittedIssueId = submitted ? newIssueId : previous.submittedIssueId();
+    private ReportsState readReports(User viewer, ReportsState previous, int successMessage, int failureMessage) {
         try {
             var reports = new ArrayList<ReportDisplay>();
+            boolean regular = viewer.role() == User.Role.REGULAR;
             for (var summary : issues().list(viewer)) {
                 var issue = summary.issue();
-                reports.add(new ReportDisplay(issue.id(), issue.title(), summary.categoryName(),
-                        issue.location(), summary.reporterName(), issue.status().name(), issue.description()));
+                boolean canManage = regular && issue.status() == Issue.Status.OPEN;
+                reports.add(new ReportDisplay(issue.id(), issue.title(), issue.categoryId(), summary.categoryName(),
+                        issue.location(), summary.reporterName(), issue.status().name(), issue.description(),
+                        canManage));
             }
 
             var categories = new ArrayList<CategoryOption>();
-            if (viewer.role() == User.Role.REGULAR) {
+            if (regular) {
                 for (var category : issues().activeCategories()) {
                     categories.add(new CategoryOption(category.id(), category.name()));
                 }
             }
 
             int message = reports.isEmpty() ? R.string.reports_empty : R.string.reports_loaded;
-            if (submitted) {
-                message = R.string.report_submitted;
+            if (successMessage != 0) {
+                message = successMessage;
             }
-            return new ReportsState(List.copyOf(reports), List.copyOf(categories),
-                    message, null, false, submittedIssueId);
+            return new ReportsState(List.copyOf(reports), List.copyOf(categories), message, null, false,
+                    previous.savedDraftCount(), previous.cancelledIssueId());
         } catch (SQLException exception) {
             Log.w(TAG, "Loading reports failed.", exception);
-            int message = submitted ? R.string.report_submitted_refresh_failed : R.string.reports_load_failed;
-            return new ReportsState(previous.items(), previous.categories(),
-                    message, null, false, submittedIssueId);
+            return previous.withStatus(failureMessage, false);
         }
     }
 
