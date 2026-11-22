@@ -255,31 +255,17 @@ public final class CampusFixController {
             return;
         }
         long reportId = editingReportId;
-        boolean editing = reportId != 0;
         long category = view.reportCategoryId();
         String title = view.reportTitle();
         String location = view.reportLocation();
         String description = view.reportDescription();
-        view.showReportStatus(editing ? "Saving report..." : "Submitting report...", true);
-
-        worker.execute(() -> {
-            try {
-                if (editing) {
-                    reports.edit(user, reportId, category, title, description, location);
-                } else {
-                    reports.submit(user, category, title, description, location);
-                }
-                updateAccount(user, () -> {
-                    discardEdit();
-                    refreshAfterChange(editing ? "Report updated." : "Report submitted.");
-                });
-            } catch (IllegalArgumentException exception) {
-                updateAccount(user, () -> view.showReportStatus(exception.getMessage(), false));
-            } catch (SQLException exception) {
-                LOGGER.log(Level.WARNING, "Saving the report failed.", exception);
-                updateAccount(user, () -> view.showReportStatus("Could not save the report.", false));
-            }
-        });
+        if (reportId == 0) {
+            executeReportCommand(user, () -> reports.submit(user, category, title, description, location),
+                    "Submitting report...", "Report submitted.", "Could not save the report.", this::discardEdit);
+        } else {
+            executeReportCommand(user, () -> reports.edit(user, reportId, category, title, description, location),
+                    "Saving report...", "Report updated.", "Could not save the report.", this::discardEdit);
+        }
     }
 
     private void cancelReport() {
@@ -292,23 +278,12 @@ public final class CampusFixController {
             return;
         }
 
-        view.showReportStatus("Cancelling report...", true);
-        worker.execute(() -> {
-            try {
-                reports.cancel(user, report.id());
-                updateAccount(user, () -> {
+        executeReportCommand(user, () -> reports.cancel(user, report.id()),
+                "Cancelling report...", "Report cancelled.", "Could not cancel the report.", () -> {
                     if (editingReportId == report.id()) {
                         discardEdit();
                     }
-                    refreshAfterChange("Report cancelled.");
                 });
-            } catch (IllegalArgumentException exception) {
-                updateAccount(user, () -> view.showReportStatus(exception.getMessage(), false));
-            } catch (SQLException exception) {
-                LOGGER.log(Level.WARNING, "Cancelling the report failed.", exception);
-                updateAccount(user, () -> view.showReportStatus("Could not cancel the report.", false));
-            }
-        });
     }
 
     private void advanceReport(Issue.Status targetStatus) {
@@ -323,27 +298,39 @@ public final class CampusFixController {
             return;
         }
 
-        String note = resolving ? view.resolutionNote() : null;
-        view.showReportStatus(resolving ? "Resolving report..." : "Starting work...", true);
+        if (resolving) {
+            String note = view.resolutionNote();
+            executeReportCommand(user, () -> reports.resolve(user, report.id(), note),
+                    "Resolving report...", "Report resolved.", "Could not resolve the report.",
+                    () -> view.clearResolutionNote(report.id()));
+        } else {
+            executeReportCommand(user, () -> reports.startWork(user, report.id()),
+                    "Starting work...", "Work started.", "Could not start work.", null);
+        }
+    }
+
+    @FunctionalInterface
+    private interface ReportCommand {
+        void execute() throws SQLException;
+    }
+
+    private void executeReportCommand(User user, ReportCommand command, String progressMessage,
+                                      String successMessage, String failureMessage, Runnable afterSuccess) {
+        view.showReportStatus(progressMessage, true);
         worker.execute(() -> {
             try {
-                if (resolving) {
-                    reports.resolve(user, report.id(), note);
-                } else {
-                    reports.startWork(user, report.id());
-                }
+                command.execute();
                 updateAccount(user, () -> {
-                    if (resolving) {
-                        view.clearResolutionNote(report.id());
+                    if (afterSuccess != null) {
+                        afterSuccess.run();
                     }
-                    refreshAfterChange(resolving ? "Report resolved." : "Work started.");
+                    refreshAfterChange(successMessage);
                 });
             } catch (IllegalArgumentException exception) {
                 updateAccount(user, () -> view.showReportStatus(exception.getMessage(), false));
             } catch (SQLException exception) {
-                LOGGER.log(Level.WARNING, "Updating the report status failed.", exception);
-                String message = resolving ? "Could not resolve the report." : "Could not start work.";
-                updateAccount(user, () -> view.showReportStatus(message, false));
+                LOGGER.log(Level.WARNING, failureMessage, exception);
+                updateAccount(user, () -> view.showReportStatus(failureMessage, false));
             }
         });
     }

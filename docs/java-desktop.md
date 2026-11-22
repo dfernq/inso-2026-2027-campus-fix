@@ -80,6 +80,27 @@ database dependency explicitly, so integration tests can supply a manager
 configured for `campusfix_test`. The Controller's worker still owns JDBC
 access and closes the connection when the window closes.
 
+### Run report changes using Command
+
+A `ReportCommand` packages a report change and the values it needs so the
+Controller can queue it for later execution. When an administrator chooses
+**Resolve report**, the Controller captures the signed-in user, report ID,
+and note on Swing's event thread. The worker runs the command, which calls
+`IssueService.resolve` with those captured values. The Model still validates
+the note and checks whether the report can be resolved.
+
+Submission, editing, cancellation, starting work, and resolution all use
+`executeReportCommand`. It shows progress, queues the work, and handles
+completion on Swing's event thread. It refreshes the list after a successful
+change, shows validation or database errors, and applies feedback only to
+the account that requested the change. Each action supplies its own messages
+and any cleanup it needs. For example, resolution clears the draft note after
+the write succeeds, so a validation error leaves the note available to edit.
+
+This keeps worker scheduling and error handling in one place. Changes to
+that flow apply to every report action, while each action keeps its own
+inputs and completion behavior.
+
 ## Architecture
 
 The `java/model` module contains database access without a UI dependency.
