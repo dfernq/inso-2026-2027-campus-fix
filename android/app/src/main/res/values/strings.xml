@@ -51,4 +51,18 @@
     <string name="report_cancelled">Report cancelled.</string>
     <string name="report_cancel_failed">Could not cancel the report.</string>
     <string name="report_cancelled_refresh_failed">Report cancelled. Could not refresh reports.</string>
+    <string name="start_work">Start work</string>
+    <string name="resolve_report">Resolve report</string>
+    <string name="resolve_report_heading">Resolve report #%1$d</string>
+    <string name="resolution_note">Resolution note</string>
+    <string name="discard_resolution">Discard note</string>
+    <string name="report_row_resolution_note">Resolution note\n%1$s</string>
+    <string name="report_starting_work">Starting work…</string>
+    <string name="report_work_started">Work started.</string>
+    <string name="report_start_work_failed">Could not start work.</string>
+    <string name="report_work_started_refresh_failed">Work started. Could not refresh reports.</string>
+    <string name="report_resolving">Resolving report…</string>
+    <string name="report_resolved">Report resolved.</string>
+    <string name="report_resolve_failed">Could not resolve the report.</string>
+    <string name="report_resolved_refresh_failed">Report resolved. Could not refresh reports.</string>
 </resources>

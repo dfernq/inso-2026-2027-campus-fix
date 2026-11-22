@@ -61,27 +61,36 @@ public final class CampusFixViewModel extends ViewModel {
 
     public record ReportDisplay(long id, String title, long categoryId, String category,
                                 String location, String reporter, String status,
-                                String description, boolean canManage) {
+                                String description, String resolutionNote,
+                                boolean canManage, boolean canStartWork, boolean canResolve) {
     }
 
     public record ReportsState(List<ReportDisplay> items, List<CategoryOption> categories,
                                int message, String validationMessage, boolean busy,
-                               long savedDraftCount, long cancelledIssueId) {
+                               long savedDraftCount, long cancelledIssueId, long resolvedIssueId) {
         private ReportsState withStatus(int message, boolean busy) {
-            return new ReportsState(items, categories, message, null, busy, savedDraftCount, cancelledIssueId);
+            return new ReportsState(items, categories, message, null, busy,
+                    savedDraftCount, cancelledIssueId, resolvedIssueId);
         }
 
         private ReportsState withValidationMessage(String validationMessage) {
             return new ReportsState(items, categories, 0, validationMessage, false,
-                    savedDraftCount, cancelledIssueId);
+                    savedDraftCount, cancelledIssueId, resolvedIssueId);
         }
 
         private ReportsState afterSave() {
-            return new ReportsState(items, categories, message, null, busy, savedDraftCount + 1, cancelledIssueId);
+            return new ReportsState(items, categories, message, null, busy,
+                    savedDraftCount + 1, cancelledIssueId, resolvedIssueId);
         }
 
         private ReportsState afterCancellation(long issueId) {
-            return new ReportsState(items, categories, message, null, busy, savedDraftCount, issueId);
+            return new ReportsState(items, categories, message, null, busy,
+                    savedDraftCount, issueId, resolvedIssueId);
+        }
+
+        private ReportsState afterResolution(long issueId) {
+            return new ReportsState(items, categories, message, null, busy,
+                    savedDraftCount, cancelledIssueId, issueId);
         }
     }
 
@@ -164,7 +173,8 @@ public final class CampusFixViewModel extends ViewModel {
         boolean regular = user.role() == User.Role.REGULAR;
         int title = regular ? R.string.regular_account : R.string.admin_account;
         var account = new AccountDisplay(user.username(), title, regular);
-        var initialReports = new ReportsState(List.of(), List.of(), R.string.reports_loading, null, true, 0, 0);
+        var initialReports = new ReportsState(List.of(), List.of(),
+                R.string.reports_loading, null, true, 0, 0, 0);
         state.setValue(new State(Status.READY, account, initialReports));
         loadReports(user, initialReports);
     }
@@ -231,6 +241,47 @@ public final class CampusFixViewModel extends ViewModel {
         });
     }
 
+    public void startWork(long issueId) {
+        advanceReport(issueId, Issue.Status.IN_PROGRESS, null);
+    }
+
+    public void resolveReport(long issueId, String note) {
+        advanceReport(issueId, Issue.Status.RESOLVED, note);
+    }
+
+    private void advanceReport(long issueId, Issue.Status targetStatus, String note) {
+        var reports = state.getValue().reports();
+        if (reports == null || reports.busy()) {
+            return;
+        }
+
+        var administrator = signedInUser;
+        boolean resolving = targetStatus == Issue.Status.RESOLVED;
+        int progressMessage = resolving ? R.string.report_resolving : R.string.report_starting_work;
+        showReports(reports.withStatus(progressMessage, true));
+        worker.execute(() -> {
+            try {
+                var changed = reports;
+                if (resolving) {
+                    issues().resolve(administrator, issueId, note);
+                    changed = reports.afterResolution(issueId);
+                } else {
+                    issues().startWork(administrator, issueId);
+                }
+                int success = resolving ? R.string.report_resolved : R.string.report_work_started;
+                int refreshFailure = resolving
+                        ? R.string.report_resolved_refresh_failed : R.string.report_work_started_refresh_failed;
+                publishReports(administrator, readReports(administrator, changed, success, refreshFailure));
+            } catch (IllegalArgumentException exception) {
+                publishReports(administrator, reports.withValidationMessage(exception.getMessage()));
+            } catch (SQLException exception) {
+                Log.w(TAG, "Updating the report status failed.", exception);
+                int message = resolving ? R.string.report_resolve_failed : R.string.report_start_work_failed;
+                publishReports(administrator, reports.withStatus(message, false));
+            }
+        });
+    }
+
     private void loadReports(User viewer, ReportsState previous) {
         worker.execute(() -> publishReports(viewer, readReports(viewer, previous, 0, R.string.reports_load_failed)));
     }
@@ -239,12 +290,16 @@ public final class CampusFixViewModel extends ViewModel {
         try {
             var reports = new ArrayList<ReportDisplay>();
             boolean regular = viewer.role() == User.Role.REGULAR;
+            boolean admin = viewer.role() == User.Role.ADMIN;
             for (var summary : issues().list(viewer)) {
                 var issue = summary.issue();
-                boolean canManage = regular && issue.status() == Issue.Status.OPEN;
+                boolean open = issue.status() == Issue.Status.OPEN;
+                boolean canManage = regular && open;
+                boolean canStartWork = admin && open;
+                boolean canResolve = admin && issue.status() == Issue.Status.IN_PROGRESS;
                 reports.add(new ReportDisplay(issue.id(), issue.title(), issue.categoryId(), summary.categoryName(),
                         issue.location(), summary.reporterName(), issue.status().name(), issue.description(),
-                        canManage));
+                        issue.resolutionNote(), canManage, canStartWork, canResolve));
             }
 
             var categories = new ArrayList<CategoryOption>();
@@ -259,7 +314,7 @@ public final class CampusFixViewModel extends ViewModel {
                 message = successMessage;
             }
             return new ReportsState(List.copyOf(reports), List.copyOf(categories), message, null, false,
-                    previous.savedDraftCount(), previous.cancelledIssueId());
+                    previous.savedDraftCount(), previous.cancelledIssueId(), previous.resolvedIssueId());
         } catch (SQLException exception) {
             Log.w(TAG, "Loading reports failed.", exception);
             return previous.withStatus(failureMessage, false);

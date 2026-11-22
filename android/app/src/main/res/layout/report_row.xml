@@ -24,6 +24,13 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp" />
+
+    <TextView
+        android:id="@+id/report_row_resolution_note"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" />
+
     <LinearLayout
         android:id="@+id/report_row_actions"
         style="?android:attr/buttonBarStyle"
@@ -47,5 +54,19 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
             android:text="@string/cancel_report" />
+
+        <Button
+            android:id="@+id/start_work"
+            style="?android:attr/buttonBarButtonStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/start_work" />
+
+        <Button
+            android:id="@+id/open_resolution"
+            style="?android:attr/buttonBarButtonStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/resolve_report" />
     </LinearLayout>
 </LinearLayout>

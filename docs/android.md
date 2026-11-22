@@ -2,7 +2,7 @@
 
 The Android client lets regular users submit maintenance reports and review
 their own reports. They can edit or cancel a report while it is open.
-Administrators can review reports from all users.
+Administrators can review reports from all users, start work, and record resolutions.
 
 ## Changesets
 
@@ -34,6 +34,17 @@ a report keeps it visible with status `CANCELLED`.
 update statements check the reporter and current status in PostgreSQL, so
 changes from a stale screen are rejected after the report is cancelled.
 
+### Start work and resolve reports
+
+Administrators move an `OPEN` report to `IN_PROGRESS` with **Start work**.
+On a report in progress, **Resolve report** opens the resolution form. A
+nonblank note of up to 2,000 characters is required to mark it `RESOLVED`.
+The note appears on the report for the reporter and administrators.
+
+`IssueService` validates the role and note. The Model checks the current
+status in the same database statement that advances it. Resolution saves
+the new status and note together.
+
 ## Architecture
 
 ```mermaid
@@ -60,9 +71,10 @@ classDiagram
 ```
 
 - **View.** `MainActivity` reads the forms, forwards actions, and renders the
-  ViewModel's state. The Activity keeps the draft and its report ID across
-  rotation and clears them after saving, cancelling that report, or signing out. It obtains the
-  ViewModel through `ViewModelProvider` and the application factory.
+  ViewModel's state. It preserves unfinished report edits and resolution notes
+  with their report IDs across rotation and clears them after the operation
+  succeeds or the user signs out. `ViewModelProvider` supplies the ViewModel
+  through the application factory.
 - **ViewModel.** `CampusFixViewModel` owns the account, reports, category options,
   and operation status. Its `state()` method exposes `LiveData<State>` for the
   Activity to observe. Updates go through a private `MutableLiveData`. The same
@@ -128,6 +140,11 @@ save and cancel it. Confirm that the list shows `CANCELLED`. Sign in as `bob`
 to confirm the report is absent, then as `admin` to find it under **All reports**.
 Use **Check database connection** on the sign-in screen to verify PostgreSQL
 access.
+
+Submit another report as `alice`, then sign in as `admin` and tap **Start work**.
+Open **Resolve report**, enter a note, and rotate the device to verify that
+the note and report ID survive. Save the note and sign back in as the reporter
+to confirm the report shows `RESOLVED` and displays the note.
 
 The debug build keeps credentials out of the APK and Git. Use this client with
 a trusted local development database. An established connection is not recovered

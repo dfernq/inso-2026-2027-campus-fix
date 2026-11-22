@@ -34,6 +34,8 @@ public final class MainActivity extends ComponentActivity {
     private static final String DRAFT_CATEGORY = "draftCategory";
     private static final String DRAFT_ISSUE = "draftIssue";
     private static final String RENDERED_SAVE_COUNT = "renderedSaveCount";
+    private static final String RESOLUTION_ISSUE = "resolutionIssue";
+    private static final String RESOLUTION_NOTE = "resolutionNote";
 
     private CampusFixViewModel viewModel;
     private AlertDialog cancellationDialog;
@@ -59,11 +61,17 @@ public final class MainActivity extends ComponentActivity {
     private Spinner reportCategory;
     private Button submit;
     private Button discardEdit;
+    private View resolutionForm;
+    private TextView resolutionHeading;
+    private EditText resolutionNote;
+    private Button resolveButton;
+    private Button discardResolution;
     private ArrayAdapter<String> categoryNames;
     private List<CategoryOption> displayedCategories = List.of();
     private List<ReportDisplay> displayedReports = List.of();
     private long restoredCategoryId;
     private long editingIssueId;
+    private long resolvingIssueId;
     private long renderedSaveCount;
 
     @Override
@@ -105,6 +113,11 @@ public final class MainActivity extends ComponentActivity {
         reportCategory = findViewById(R.id.report_category);
         submit = findViewById(R.id.submit_report);
         discardEdit = findViewById(R.id.discard_edit);
+        resolutionForm = findViewById(R.id.resolution_form);
+        resolutionHeading = findViewById(R.id.resolution_heading);
+        resolutionNote = findViewById(R.id.resolution_note);
+        resolveButton = findViewById(R.id.resolve_report);
+        discardResolution = findViewById(R.id.discard_resolution);
 
         categoryNames = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item);
         categoryNames.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
@@ -141,6 +154,14 @@ public final class MainActivity extends ComponentActivity {
             hideKeyboard(reportDescription);
             clearDraft();
         });
+        resolveButton.setOnClickListener(view -> {
+            hideKeyboard(resolutionNote);
+            viewModel.resolveReport(resolvingIssueId, resolutionNote.getText().toString());
+        });
+        discardResolution.setOnClickListener(view -> {
+            hideKeyboard(resolutionNote);
+            clearResolutionDraft();
+        });
     }
 
     private void configureInsets() {
@@ -174,6 +195,7 @@ public final class MainActivity extends ComponentActivity {
 
         accountPanel.setVisibility(View.GONE);
         clearDraft();
+        clearResolutionDraft();
         renderedSaveCount = 0;
         renderCategories(List.of());
         renderRows(List.of(), false);
@@ -201,6 +223,10 @@ public final class MainActivity extends ComponentActivity {
             clearDraft();
         }
         renderDraftMode();
+        if (resolvingIssueId != 0 && resolvingIssueId == reports.resolvedIssueId()) {
+            clearResolutionDraft();
+        }
+        renderResolutionForm(!reports.busy());
         renderCategories(reports.categories());
         renderRows(reports.items(), reports.busy());
         if (reports.validationMessage() == null) {
@@ -265,6 +291,8 @@ public final class MainActivity extends ComponentActivity {
             View row = reportList.getChildAt(index);
             row.findViewById(R.id.edit_report).setEnabled(!busy);
             row.findViewById(R.id.cancel_report).setEnabled(!busy);
+            row.findViewById(R.id.start_work).setEnabled(!busy);
+            row.findViewById(R.id.open_resolution).setEnabled(!busy);
         }
     }
 
@@ -278,11 +306,57 @@ public final class MainActivity extends ComponentActivity {
                 report.reporter(), report.status()));
         description.setText(report.description());
 
+        TextView note = row.findViewById(R.id.report_row_resolution_note);
+        if (report.resolutionNote() == null) {
+            note.setVisibility(View.GONE);
+        } else {
+            note.setText(getString(R.string.report_row_resolution_note, report.resolutionNote()));
+        }
+
         View actions = row.findViewById(R.id.report_row_actions);
-        actions.setVisibility(report.canManage() ? View.VISIBLE : View.GONE);
-        row.findViewById(R.id.edit_report).setOnClickListener(view -> showReportForEditing(report));
-        row.findViewById(R.id.cancel_report).setOnClickListener(view -> confirmCancellation(report.id()));
+        boolean adminAction = report.canStartWork() || report.canResolve();
+        boolean showActions = report.canManage() || adminAction;
+        actions.setVisibility(showActions ? View.VISIBLE : View.GONE);
+
+        View edit = row.findViewById(R.id.edit_report);
+        View cancel = row.findViewById(R.id.cancel_report);
+        View start = row.findViewById(R.id.start_work);
+        View resolve = row.findViewById(R.id.open_resolution);
+        edit.setVisibility(report.canManage() ? View.VISIBLE : View.GONE);
+        cancel.setVisibility(report.canManage() ? View.VISIBLE : View.GONE);
+        start.setVisibility(report.canStartWork() ? View.VISIBLE : View.GONE);
+        resolve.setVisibility(report.canResolve() ? View.VISIBLE : View.GONE);
+        edit.setOnClickListener(view -> showReportForEditing(report));
+        cancel.setOnClickListener(view -> confirmCancellation(report.id()));
+        start.setOnClickListener(view -> viewModel.startWork(report.id()));
+        resolve.setOnClickListener(view -> openResolution(report.id()));
         return row;
+    }
+
+    private void openResolution(long issueId) {
+        if (resolvingIssueId != issueId) {
+            resolutionNote.getText().clear();
+            resolvingIssueId = issueId;
+        }
+        renderResolutionForm(true);
+        screen.smoothScrollTo(0, accountPanel.getTop() + resolutionForm.getTop());
+    }
+
+    private void renderResolutionForm(boolean ready) {
+        boolean editing = resolvingIssueId != 0;
+        resolutionForm.setVisibility(editing ? View.VISIBLE : View.GONE);
+        if (editing) {
+            resolutionHeading.setText(getString(R.string.resolve_report_heading, resolvingIssueId));
+        }
+        resolutionNote.setEnabled(ready);
+        resolveButton.setEnabled(ready);
+        discardResolution.setEnabled(ready);
+    }
+
+    private void clearResolutionDraft() {
+        resolvingIssueId = 0;
+        resolutionNote.getText().clear();
+        resolutionForm.setVisibility(View.GONE);
     }
 
     private void showReportForEditing(ReportDisplay report) {
@@ -337,6 +411,8 @@ public final class MainActivity extends ComponentActivity {
         restoredCategoryId = savedInstanceState.getLong(DRAFT_CATEGORY);
         editingIssueId = savedInstanceState.getLong(DRAFT_ISSUE);
         renderedSaveCount = savedInstanceState.getLong(RENDERED_SAVE_COUNT);
+        resolvingIssueId = savedInstanceState.getLong(RESOLUTION_ISSUE);
+        resolutionNote.setText(savedInstanceState.getString(RESOLUTION_NOTE, ""));
     }
 
     @Override
@@ -348,6 +424,8 @@ public final class MainActivity extends ComponentActivity {
         outState.putLong(DRAFT_CATEGORY, selectedCategoryId());
         outState.putLong(DRAFT_ISSUE, editingIssueId);
         outState.putLong(RENDERED_SAVE_COUNT, renderedSaveCount);
+        outState.putLong(RESOLUTION_ISSUE, resolvingIssueId);
+        outState.putString(RESOLUTION_NOTE, resolutionNote.getText().toString());
     }
 
     @Override
