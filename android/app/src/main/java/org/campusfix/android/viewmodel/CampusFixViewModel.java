@@ -11,8 +11,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 import org.campusfix.android.R;
 import org.campusfix.model.auth.AuthenticationService;
@@ -117,19 +116,21 @@ public final class CampusFixViewModel extends ViewModel {
         void apply(User administrator) throws SQLException;
     }
 
-    private final Supplier<DatabaseConnection> createDatabase;
+    private final Supplier<DatabaseConnection> getDatabase;
+    private final Executor worker;
     // See https://developer.android.com/topic/libraries/architecture/livedata#create_livedata_objects
     private final MutableLiveData<State> state = new MutableLiveData<>(new State(Status.READY));
-    private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler mainThread = new Handler(Looper.getMainLooper());
     private DatabaseConnection database;
     private AuthenticationService authentication;
     private IssueService issues;
     private CategoryService categories;
     private User signedInUser;
+    private boolean cleared;
 
-    public CampusFixViewModel(Supplier<DatabaseConnection> createDatabase) {
-        this.createDatabase = createDatabase;
+    public CampusFixViewModel(Supplier<DatabaseConnection> getDatabase, Executor worker) {
+        this.getDatabase = getDatabase;
+        this.worker = worker;
     }
 
     public LiveData<State> state() {
@@ -184,7 +185,7 @@ public final class CampusFixViewModel extends ViewModel {
     }
 
     private void completeSignIn(User user) {
-        if (worker.isShutdown()) {
+        if (cleared) {
             return;
         }
         signedInUser = user;
@@ -477,7 +478,7 @@ public final class CampusFixViewModel extends ViewModel {
 
     private DatabaseConnection database() {
         if (database == null) {
-            database = createDatabase.get();
+            database = getDatabase.get();
         }
         return database;
     }
@@ -506,9 +507,9 @@ public final class CampusFixViewModel extends ViewModel {
 
     @Override
     protected void onCleared() {
+        cleared = true;
         signedInUser = null;
         worker.execute(this::closeDatabase);
-        worker.shutdown();
     }
 
     private void closeDatabase() {

@@ -56,6 +56,19 @@ checks permission and validates changes before the DAO writes them.
 Report forms offer active categories. Existing reports keep their category ID
 and display the current category name even after deactivation.
 
+### Share database access using Singleton
+
+A new Activity can create a new ViewModel in the same app process. The
+Singleton lets those ViewModels reuse one connection manager and one worker.
+The worker serializes database operations across ViewModels so they can share
+the PostgreSQL session safely.
+
+`CampusFixApplication` obtains the single `DatabaseAccess` instance and
+passes each ViewModel the worker and a function to get the shared connection
+manager. The first request loads the app's private `.env`. When a ViewModel
+is cleared, it queues connection cleanup on the same worker. The next
+database operation can reopen the connection through the same manager.
+
 ## Architecture
 
 ```mermaid
@@ -65,7 +78,8 @@ classDiagram
         <<interface>>
     }
     CampusFixApplication ..> CampusFixViewModel : creates
-    CampusFixApplication ..> DatabaseConnection : creates
+    CampusFixApplication ..> DatabaseAccess : gets instance
+    DatabaseAccess --> DatabaseConnection : shared manager
     MainActivity ..> CampusFixViewModel : observes and calls
     MainActivity *-- CategoryPanel : category editor
     CategoryPanel ..> CampusFixViewModel : calls
@@ -92,9 +106,10 @@ classDiagram
   ViewModel through the application factory.
 - **ViewModel.** `CampusFixViewModel` owns the account, reports, category lists,
   current section, and operation status. Its `state()` method exposes
-  `LiveData<State>` for the Activity to observe. Updates go through a private `MutableLiveData`. The same
-  ViewModel serves the recreated Activity after rotation. One worker runs
-  database operations and closes the connection when the ViewModel is cleared.
+  `LiveData<State>` for the Activity to observe. Updates go through a private
+  `MutableLiveData`. The same ViewModel serves the recreated Activity after
+  rotation. The application supplies the worker that runs database operations
+  and closes the connection when a ViewModel is cleared.
 - **Model.** `AuthenticationService` verifies credentials, and `IssueService`
   validates report changes and selects reports by role. `CategoryService`
   restricts category management to administrators. The DAOs implement
