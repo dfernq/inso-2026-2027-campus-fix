@@ -110,6 +110,24 @@ by ID even if a newer report moves it down the list. The column definitions
 and row conversion live together in the View layer, so changes to column
 order and widths stay local to the adapter.
 
+### Give the report form explicit states
+
+The Controller uses the **State** pattern to decide what the form does on
+save. `NewReport` prepares a submission command. Choosing **Edit report**
+switches to `EditingReport`, which prepares an update. A successful save,
+discard, sign-out, or cancellation of the report being edited returns the
+form to `NewReport`. A validation error preserves the state and form values.
+
+- **Correctness.** `EditingReport` keeps the original report ID in a frozen
+  record. Selecting another row leaves the save target intact. The Controller
+  also checks that ID before clearing a draft after cancellation.
+- **Readability.** The state names make the form mode explicit. Each state's
+  `prepare_save()` method keeps its Model operation next to its progress and
+  success messages.
+- **Flexibility.** A new form mode can follow the same `ReportFormState`
+  contract and prepare its own command. The Controller defines its transitions
+  and reuses the existing worker scheduling, validation feedback, and refresh.
+
 ## Architecture
 
 ```mermaid

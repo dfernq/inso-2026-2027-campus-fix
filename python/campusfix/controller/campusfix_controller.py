@@ -7,6 +7,12 @@ from typing import TypeVar
 
 import psycopg
 
+from campusfix.controller.report_form_state import (
+    EditingReport,
+    NewReport,
+    ReportCommand,
+    ReportFormState,
+)
 from campusfix.model.auth.authentication_service import AuthenticationService
 from campusfix.model.domain.category import Category
 from campusfix.model.domain.issue import Status
@@ -21,7 +27,6 @@ from campusfix.view.report_table import ReportRow
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
-ReportCommand = Callable[[], object]
 
 
 class CampusFixController:
@@ -40,7 +45,7 @@ class CampusFixController:
         self._view = CampusFixView(self._window)
         self._worker = ThreadPoolExecutor(max_workers=1)
         self._signed_in_user: User | None = None
-        self._editing_report_id: int | None = None
+        self._report_form: ReportFormState = NewReport()
         self._managing_categories = False
         self._pending_callback: str | None = None
         self._view.on_sign_in(self._sign_in)
@@ -54,7 +59,7 @@ class CampusFixController:
         self._view.on_submit_report(self._save_report)
         self._view.on_edit_report(self._begin_edit)
         self._view.on_cancel_report(self._cancel_report)
-        self._view.on_discard_edit(self._discard_edit)
+        self._view.on_discard_edit(self._reset_report_form)
         self._view.on_start_work(lambda: self._advance_report(Status.IN_PROGRESS))
         self._view.on_resolve_report(lambda: self._advance_report(Status.RESOLVED))
         self._window.protocol("WM_DELETE_WINDOW", self._close_window)
@@ -95,7 +100,7 @@ class CampusFixController:
     def _sign_out(self) -> None:
         self._cancel_pending_callback()
         self._signed_in_user = None
-        self._editing_report_id = None
+        self._report_form = NewReport()
         self._managing_categories = False
         self._view.show_sign_in()
 
@@ -286,40 +291,31 @@ class CampusFixController:
         report = self._view.selected_report()
         if report is None or not report.can_manage:
             return
-        self._editing_report_id = report.id
+        self._report_form = EditingReport(report.id)
         self._view.show_report_for_editing(report)
 
-    def _discard_edit(self) -> None:
-        self._editing_report_id = None
+    def _reset_report_form(self) -> None:
+        self._report_form = NewReport()
         self._view.clear_report_form()
 
     def _save_report(self) -> None:
         user = self._signed_in_user
         if user is None:
             return
-        issue_id = self._editing_report_id
-        category_id = self._view.report_category_id()
-        title = self._view.report_title()
-        description = self._view.report_description()
-        location = self._view.report_location()
-
-        if issue_id is None:
-            command = partial(self._reports.submit, user, category_id, title, description, location)
-            progress = "Submitting report..."
-            success = "Report submitted."
-        else:
-            command = partial(
-                self._reports.edit, user, issue_id, category_id, title, description, location
-            )
-            progress = "Saving report..."
-            success = "Report updated."
-
+        save = self._report_form.prepare_save(
+            self._reports,
+            user,
+            self._view.report_category_id(),
+            self._view.report_title(),
+            self._view.report_description(),
+            self._view.report_location(),
+        )
         self._execute_report_command(
-            command,
-            progress_message=progress,
-            success_message=success,
+            save.command,
+            progress_message=save.progress_message,
+            success_message=save.success_message,
             failure_message="Could not save the report.",
-            on_success=self._discard_edit,
+            on_success=self._reset_report_form,
         )
 
     def _cancel_report(self) -> None:
@@ -330,7 +326,7 @@ class CampusFixController:
         if not report.can_manage or not self._view.confirm_cancellation(report.id):
             return
 
-        on_success = self._discard_edit if self._editing_report_id == report.id else None
+        on_success = self._reset_report_form if self._report_form.edits(report.id) else None
         self._execute_report_command(
             partial(self._reports.cancel, user, report.id),
             progress_message="Cancelling report...",
