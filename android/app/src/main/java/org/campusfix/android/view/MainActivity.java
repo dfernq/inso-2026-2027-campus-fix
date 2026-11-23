@@ -7,7 +7,6 @@ import android.view.inputmethod.EditorInfo;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -55,7 +54,7 @@ public final class MainActivity extends ComponentActivity {
     private TextView accountName;
     private TextView reportsTitle;
     private TextView reportStatus;
-    private LinearLayout reportList;
+    private ReportListAdapter reportList;
     private Button refresh;
     private View reportForm;
     private TextView reportFormHeading;
@@ -72,7 +71,6 @@ public final class MainActivity extends ComponentActivity {
     private Button discardResolution;
     private ArrayAdapter<String> categoryNames;
     private List<CategoryOption> displayedCategories = List.of();
-    private List<ReportDisplay> displayedReports = List.of();
     private long restoredCategoryId;
     private long editingIssueId;
     private long resolvingIssueId;
@@ -92,6 +90,8 @@ public final class MainActivity extends ComponentActivity {
                 .get(CampusFixViewModel.class);
         categoryPanel = new CategoryPanel(this, viewModel);
         categoryPanel.restoreDraft(savedInstanceState);
+        reportList = new ReportListAdapter(findViewById(R.id.report_list),
+                this::showReportForEditing, this::confirmCancellation, viewModel::startWork, this::openResolution);
         bindActions();
         viewModel.state().observe(this, this::render);
     }
@@ -111,7 +111,6 @@ public final class MainActivity extends ComponentActivity {
         accountName = findViewById(R.id.account_name);
         reportsTitle = findViewById(R.id.reports_title);
         reportStatus = findViewById(R.id.report_status);
-        reportList = findViewById(R.id.report_list);
         refresh = findViewById(R.id.refresh_reports);
         reportForm = findViewById(R.id.report_form);
         reportFormHeading = findViewById(R.id.report_form_heading);
@@ -212,7 +211,7 @@ public final class MainActivity extends ComponentActivity {
         clearResolutionDraft();
         renderedSaveCount = 0;
         renderCategories(List.of());
-        renderRows(List.of(), false);
+        reportList.render(List.of(), false);
 
         status.setText(state.signInStatus().message());
         boolean ready = !state.signInStatus().busy();
@@ -257,7 +256,7 @@ public final class MainActivity extends ComponentActivity {
         }
         renderResolutionForm(!reports.busy());
         renderCategories(reports.categories());
-        renderRows(reports.items(), reports.busy());
+        reportList.render(reports.items(), reports.busy());
         if (reports.validationMessage() == null) {
             reportStatus.setText(reports.message());
         } else {
@@ -304,60 +303,6 @@ public final class MainActivity extends ComponentActivity {
     private long selectedCategoryId() {
         int index = reportCategory.getSelectedItemPosition();
         return index > 0 ? displayedCategories.get(index - 1).id() : restoredCategoryId;
-    }
-
-    private void renderRows(List<ReportDisplay> reports, boolean busy) {
-        if (!displayedReports.equals(reports)) {
-            displayedReports = reports;
-            reportList.removeAllViews();
-            for (var report : reports) {
-                reportList.addView(createReportRow(report));
-            }
-        }
-        for (int index = 0; index < reportList.getChildCount(); index++) {
-            View row = reportList.getChildAt(index);
-            row.findViewById(R.id.edit_report).setEnabled(!busy);
-            row.findViewById(R.id.cancel_report).setEnabled(!busy);
-            row.findViewById(R.id.start_work).setEnabled(!busy);
-            row.findViewById(R.id.open_resolution).setEnabled(!busy);
-        }
-    }
-
-    private View createReportRow(ReportDisplay report) {
-        View row = getLayoutInflater().inflate(R.layout.report_row, reportList, false);
-        TextView title = row.findViewById(R.id.report_row_title);
-        TextView details = row.findViewById(R.id.report_row_details);
-        TextView description = row.findViewById(R.id.report_row_description);
-        title.setText(getString(R.string.report_row_title, report.id(), report.title()));
-        details.setText(getString(R.string.report_row_details, report.category(), report.location(),
-                report.reporter(), report.status()));
-        description.setText(report.description());
-
-        TextView note = row.findViewById(R.id.report_row_resolution_note);
-        if (report.resolutionNote() == null) {
-            note.setVisibility(View.GONE);
-        } else {
-            note.setText(getString(R.string.report_row_resolution_note, report.resolutionNote()));
-        }
-
-        View actions = row.findViewById(R.id.report_row_actions);
-        boolean adminAction = report.canStartWork() || report.canResolve();
-        boolean showActions = report.canManage() || adminAction;
-        actions.setVisibility(showActions ? View.VISIBLE : View.GONE);
-
-        View edit = row.findViewById(R.id.edit_report);
-        View cancel = row.findViewById(R.id.cancel_report);
-        View start = row.findViewById(R.id.start_work);
-        View resolve = row.findViewById(R.id.open_resolution);
-        edit.setVisibility(report.canManage() ? View.VISIBLE : View.GONE);
-        cancel.setVisibility(report.canManage() ? View.VISIBLE : View.GONE);
-        start.setVisibility(report.canStartWork() ? View.VISIBLE : View.GONE);
-        resolve.setVisibility(report.canResolve() ? View.VISIBLE : View.GONE);
-        edit.setOnClickListener(view -> showReportForEditing(report));
-        cancel.setOnClickListener(view -> confirmCancellation(report.id()));
-        start.setOnClickListener(view -> viewModel.startWork(report.id()));
-        resolve.setOnClickListener(view -> openResolution(report.id()));
-        return row;
     }
 
     private void openResolution(long issueId) {

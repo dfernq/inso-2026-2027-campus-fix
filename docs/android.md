@@ -89,6 +89,18 @@ sign-in session. It reports a successful write even if the list refresh
 fails. A change to scheduling or completion handling applies across all
 five actions.
 
+### Adapt report rows for the Android list
+
+`ReportListAdapter` turns the ViewModel's `ReportDisplay` records into rows
+using `report_row.xml`. It formats each report's title, details, and note,
+and binds row actions to that report's data. The Activity supplies the
+callbacks that open forms, confirm cancellation, or call the ViewModel.
+
+The layout and report data meet in one class. Changes to row formatting
+stay in the View layer. When only the busy state changes, the adapter
+updates the action buttons in place. It rebuilds the rows when their
+display data changes.
+
 ## Architecture
 
 ```mermaid
@@ -102,6 +114,7 @@ classDiagram
     DatabaseAccess --> DatabaseConnection : shared manager
     MainActivity ..> CampusFixViewModel : observes and calls
     MainActivity *-- CategoryPanel : category editor
+    MainActivity *-- ReportListAdapter : report list renderer
     CategoryPanel ..> CampusFixViewModel : calls
     CampusFixViewModel --> DatabaseConnection : database
     CampusFixViewModel --> AuthenticationService : authentication
