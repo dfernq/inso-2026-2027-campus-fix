@@ -11,6 +11,6 @@ public final class CampusFixApplication extends Application {
         return ViewModelProvider.Factory.from(new ViewModelInitializer<>(
                 CampusFixViewModel.class,
                 extras -> new CampusFixViewModel(
-                        () -> database.connection(getFilesDir()), database.worker())));
+                        () -> database.model(getFilesDir()), database.worker())));
     }
 }

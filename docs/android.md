@@ -63,18 +63,18 @@ Singleton lets those ViewModels reuse one connection manager and one worker.
 The worker serializes database operations across ViewModels so they can share
 the PostgreSQL session safely.
 
-`CampusFixApplication` obtains the single `DatabaseAccess` instance and
-passes each ViewModel the worker and a function to get the shared connection
-manager. The first request loads the app's private `.env`. When a ViewModel
-is cleared, it queues connection cleanup on the same worker. The next
-database operation can reopen the connection through the same manager.
+At this stage, `CampusFixApplication` obtains the single `DatabaseAccess`
+instance and passes each ViewModel the worker and a function to get the shared
+connection manager. The first request loads the app's private `.env`. When a
+ViewModel is cleared, it queues connection cleanup on the same worker. The
+next database operation can reopen the connection through the same manager.
 
 ### Run report changes using Command
 
 The ViewModel packages each report change as a `ReportCommand`. When an
 administrator taps **Resolve report**, the Activity sends the report ID and
 note to the ViewModel. The command holds those values, and the ViewModel
-captures the current user before queueing the command. The worker calls
+captures the current user before queueing the command. The command reaches
 `IssueService.resolve` with that user and those values.
 
 Submission, editing, cancellation, starting work, and resolution use
@@ -152,6 +152,23 @@ account, category, issue, or report summary.
   its own column conversion. The report summary mapper reuses the issue
   mapper and adds the reporter and category names from the join.
 
+### Give the ViewModel one Model entry point with Facade
+
+`CampusFix` exposes sign-in, report and category operations, and connection
+checks to the ViewModel. The application supplies access to the facade and
+the database worker. The first Model operation loads the device's private
+`.env` on that worker and creates the facade for the app process.
+
+- **Correctness.** The facade assembles every DAO with the same connection
+  manager. The worker serializes operations and cleanup. The services still
+  check permissions, validate input, and enforce report status rules.
+- **Readability.** The ViewModel calls operations such as `resolveReport()`
+  through one Model dependency. The facade keeps service and DAO construction
+  out of the ViewModel.
+- **Flexibility.** The Model can change how it assembles its services and
+  DAOs while preserving the operations used by the ViewModel. The ViewModel
+  continues to publish the same `LiveData` state for the Activity to render.
+
 ## Architecture
 
 ```mermaid
@@ -162,16 +179,21 @@ classDiagram
     }
     CampusFixApplication ..> CampusFixViewModel : creates
     CampusFixApplication ..> DatabaseAccess : gets instance
-    DatabaseAccess --> DatabaseConnection : shared manager
+    DatabaseAccess --> CampusFix : shared model
+    DatabaseAccess ..> DatabaseConnection : creates
     MainActivity ..> CampusFixViewModel : observes and calls
     MainActivity *-- CategoryPanel : category editor
     MainActivity *-- ReportListAdapter : report list renderer
     CategoryPanel ..> CampusFixViewModel : calls
-    CampusFixViewModel --> DatabaseConnection : database
-    CampusFixViewModel --> AuthenticationService : authentication
-    CampusFixViewModel --> IssueService : reports
+    CampusFixViewModel --> CampusFix : model
     CampusFixViewModel ..> ReportPresentation : selects by role
-    CampusFixViewModel --> CategoryService : categories
+    CampusFix --> DatabaseConnection : database
+    CampusFix --> AuthenticationService : authentication
+    CampusFix --> IssueService : reports
+    CampusFix --> CategoryService : categories
+    CampusFix ..> UserDao : creates
+    CampusFix ..> IssueDao : creates
+    CampusFix ..> CategoryDao : creates
     AuthenticationService --> UserDao : users
     IssueService --> IssueDao : issues
     IssueService --> CategoryDao : categories
@@ -196,13 +218,14 @@ classDiagram
   current section, and operation status. Its `state()` method exposes
   `LiveData<State>` for the Activity to observe. Updates go through a private
   `MutableLiveData`. The same ViewModel serves the recreated Activity after
-  rotation. The application supplies the worker that runs database operations
-  and closes the connection when a ViewModel is cleared.
-- **Model.** `AuthenticationService` verifies credentials, and `IssueService`
-  validates report changes and selects reports by role. `CategoryService`
-  restricts category management to administrators. The DAOs implement
-  `CrudDao` with parameterized JDBC queries. `DatabaseConnection` opens and
-  reuses an autocommit connection.
+  rotation. The ViewModel queues Model calls on the worker supplied by the
+  application. When cleared, it queues connection cleanup through the facade
+  if it has used the Model.
+- **Model.** `CampusFix` assembles the services and DAOs and exposes their
+  application operations. `AuthenticationService` verifies credentials,
+  `IssueService` enforces report rules, and `CategoryService` restricts category
+  management to administrators. The DAOs implement `CrudDao` with parameterized
+  JDBC queries. `DatabaseConnection` opens and reuses an autocommit connection.
 
 ## Run locally
 

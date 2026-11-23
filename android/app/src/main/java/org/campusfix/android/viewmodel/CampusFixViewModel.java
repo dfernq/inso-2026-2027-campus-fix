@@ -15,14 +15,8 @@ import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import org.campusfix.android.R;
-import org.campusfix.model.auth.AuthenticationService;
+import org.campusfix.model.CampusFix;
 import org.campusfix.model.domain.User;
-import org.campusfix.model.persistence.CategoryDao;
-import org.campusfix.model.persistence.DatabaseConnection;
-import org.campusfix.model.persistence.IssueDao;
-import org.campusfix.model.persistence.UserDao;
-import org.campusfix.model.reports.CategoryService;
-import org.campusfix.model.reports.IssueService;
 
 public final class CampusFixViewModel extends ViewModel {
     private static final String TAG = "CampusFixViewModel";
@@ -107,7 +101,7 @@ public final class CampusFixViewModel extends ViewModel {
         public void save(CampusFixViewModel viewModel, long categoryId, String title,
                          String description, String location) {
             viewModel.executeReportCommand(
-                    user -> viewModel.issues().submit(user, categoryId, title, description, location),
+                    user -> viewModel.model().submitReport(user, categoryId, title, description, location),
                     R.string.report_submitting, R.string.report_submitted,
                     R.string.report_save_failed, R.string.report_submitted_refresh_failed, ReportsState::afterSave);
         }
@@ -118,7 +112,7 @@ public final class CampusFixViewModel extends ViewModel {
         public void save(CampusFixViewModel viewModel, long categoryId, String title,
                          String description, String location) {
             viewModel.executeReportCommand(
-                    user -> viewModel.issues().edit(user, reportId, categoryId, title, description, location),
+                    user -> viewModel.model().editReport(user, reportId, categoryId, title, description, location),
                     R.string.report_saving, R.string.report_updated,
                     R.string.report_save_failed, R.string.report_updated_refresh_failed, ReportsState::afterSave);
         }
@@ -156,20 +150,17 @@ public final class CampusFixViewModel extends ViewModel {
         void apply(User administrator) throws SQLException;
     }
 
-    private final Supplier<DatabaseConnection> getDatabase;
+    private final Supplier<CampusFix> getModel;
     private final Executor worker;
     // See https://developer.android.com/topic/libraries/architecture/livedata#create_livedata_objects
     private final MutableLiveData<State> state = new MutableLiveData<>(new State(Status.READY));
     private final Handler mainThread = new Handler(Looper.getMainLooper());
-    private DatabaseConnection database;
-    private AuthenticationService authentication;
-    private IssueService issues;
-    private CategoryService categories;
+    private CampusFix model;
     private User signedInUser;
     private boolean cleared;
 
-    public CampusFixViewModel(Supplier<DatabaseConnection> getDatabase, Executor worker) {
-        this.getDatabase = getDatabase;
+    public CampusFixViewModel(Supplier<CampusFix> getModel, Executor worker) {
+        this.getModel = getModel;
         this.worker = worker;
     }
 
@@ -208,7 +199,7 @@ public final class CampusFixViewModel extends ViewModel {
 
     private void authenticate(String username, char[] password) {
         try {
-            var user = authentication().signIn(username, password).orElse(null);
+            var user = model().signIn(username, password).orElse(null);
             if (user == null) {
                 state.postValue(new State(Status.INVALID_CREDENTIALS));
                 return;
@@ -266,15 +257,16 @@ public final class CampusFixViewModel extends ViewModel {
 
     public void saveCategory(long categoryId, String name) {
         if (categoryId == 0) {
-            changeCategory(user -> categories().create(user, name), R.string.category_added, true);
+            changeCategory(user -> model().createCategory(user, name), R.string.category_added, true);
         } else {
-            changeCategory(user -> categories().rename(user, categoryId, name), R.string.category_renamed, true);
+            changeCategory(user -> model().renameCategory(user, categoryId, name),
+                    R.string.category_renamed, true);
         }
     }
 
     public void setCategoryActive(long categoryId, boolean active) {
         int message = active ? R.string.category_reactivated : R.string.category_deactivated;
-        changeCategory(user -> categories().setActive(user, categoryId, active), message, false);
+        changeCategory(user -> model().setCategoryActive(user, categoryId, active), message, false);
     }
 
     private void loadCategories(User administrator, CategoriesState previous) {
@@ -315,7 +307,7 @@ public final class CampusFixViewModel extends ViewModel {
     private CategoriesState readCategories(User administrator, CategoriesState previous, int successMessage) {
         try {
             var rows = new ArrayList<CategoryDisplay>();
-            for (var category : categories().list(administrator)) {
+            for (var category : model().listCategories(administrator)) {
                 rows.add(new CategoryDisplay(category.id(), category.name(), category.active()));
             }
             int message = rows.isEmpty() ? R.string.categories_empty : R.string.categories_loaded;
@@ -365,21 +357,21 @@ public final class CampusFixViewModel extends ViewModel {
     }
 
     public void cancelReport(long issueId) {
-        executeReportCommand(user -> issues().cancel(user, issueId),
+        executeReportCommand(user -> model().cancelReport(user, issueId),
                 R.string.report_cancelling, R.string.report_cancelled,
                 R.string.report_cancel_failed, R.string.report_cancelled_refresh_failed,
                 reports -> reports.afterCancellation(issueId));
     }
 
     public void startWork(long issueId) {
-        executeReportCommand(user -> issues().startWork(user, issueId),
+        executeReportCommand(user -> model().startWork(user, issueId),
                 R.string.report_starting_work, R.string.report_work_started,
                 R.string.report_start_work_failed, R.string.report_work_started_refresh_failed,
                 UnaryOperator.identity());
     }
 
     public void resolveReport(long issueId, String note) {
-        executeReportCommand(user -> issues().resolve(user, issueId, note),
+        executeReportCommand(user -> model().resolveReport(user, issueId, note),
                 R.string.report_resolving, R.string.report_resolved,
                 R.string.report_resolve_failed, R.string.report_resolved_refresh_failed,
                 reports -> reports.afterResolution(issueId));
@@ -417,13 +409,13 @@ public final class CampusFixViewModel extends ViewModel {
         try {
             var presentation = ReportPresentation.forRole(viewer.role());
             var reports = new ArrayList<ReportDisplay>();
-            for (var summary : issues().list(viewer)) {
+            for (var summary : model().listReports(viewer)) {
                 reports.add(presentation.toDisplay(summary));
             }
 
             var categories = new ArrayList<CategoryOption>();
             if (presentation.showsSubmissionForm()) {
-                for (var category : issues().activeCategories()) {
+                for (var category : model().activeCategories()) {
                     categories.add(new CategoryOption(category.id(), category.name()));
                 }
             }
@@ -454,7 +446,7 @@ public final class CampusFixViewModel extends ViewModel {
 
     private Status checkDatabase() {
         try {
-            return database().checkConnection() ? Status.CONNECTED : Status.UNEXPECTED_RESULT;
+            return model().checkConnection() ? Status.CONNECTED : Status.UNEXPECTED_RESULT;
         } catch (DotenvException | IllegalArgumentException exception) {
             return Status.CONFIGURATION_ERROR;
         } catch (SQLException exception) {
@@ -463,48 +455,26 @@ public final class CampusFixViewModel extends ViewModel {
         }
     }
 
-    private DatabaseConnection database() {
-        if (database == null) {
-            database = getDatabase.get();
+    private CampusFix model() {
+        if (model == null) {
+            model = getModel.get();
         }
-        return database;
-    }
-
-    private AuthenticationService authentication() {
-        if (authentication == null) {
-            authentication = new AuthenticationService(new UserDao(database()));
-        }
-        return authentication;
-    }
-
-    private IssueService issues() {
-        if (issues == null) {
-            var connection = database();
-            issues = new IssueService(new IssueDao(connection), new CategoryDao(connection));
-        }
-        return issues;
-    }
-
-    private CategoryService categories() {
-        if (categories == null) {
-            categories = new CategoryService(new CategoryDao(database()));
-        }
-        return categories;
+        return model;
     }
 
     @Override
     protected void onCleared() {
         cleared = true;
         signedInUser = null;
-        worker.execute(this::closeDatabase);
+        worker.execute(this::closeModel);
     }
 
-    private void closeDatabase() {
-        if (database == null) {
+    private void closeModel() {
+        if (model == null) {
             return;
         }
         try {
-            database.close();
+            model.close();
         } catch (SQLException exception) {
             Log.w(TAG, "Database connection could not be closed.", exception);
         }
