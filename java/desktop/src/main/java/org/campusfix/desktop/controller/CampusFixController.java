@@ -12,20 +12,14 @@ import org.campusfix.desktop.view.CampusFixView;
 import org.campusfix.desktop.view.CampusFixView.CategoryOption;
 import org.campusfix.desktop.view.CategoryPanel;
 import org.campusfix.desktop.view.CategoryPanel.CategoryRow;
-import org.campusfix.model.auth.AuthenticationService;
+import org.campusfix.model.CampusFix;
 import org.campusfix.model.domain.Issue;
 import org.campusfix.model.domain.User;
-import org.campusfix.model.persistence.DatabaseConnection;
-import org.campusfix.model.reports.CategoryService;
-import org.campusfix.model.reports.IssueService;
 
 public final class CampusFixController {
     private static final Logger LOGGER = Logger.getLogger(CampusFixController.class.getName());
 
-    private final DatabaseConnection database;
-    private final AuthenticationService authentication;
-    private final IssueService reports;
-    private final CategoryService categories;
+    private final CampusFix model;
     private final CampusFixView view;
     private final CategoryPanel categoryPanel;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -34,12 +28,8 @@ public final class CampusFixController {
     private boolean managingCategories;
     private boolean closing;
 
-    public CampusFixController(DatabaseConnection database, AuthenticationService authentication,
-                               IssueService reports, CategoryService categories) {
-        this.database = database;
-        this.authentication = authentication;
-        this.reports = reports;
-        this.categories = categories;
+    public CampusFixController(CampusFix model) {
+        this.model = model;
         categoryPanel = new CategoryPanel();
         view = new CampusFixView(categoryPanel);
         view.onSignIn(this::signIn);
@@ -71,7 +61,7 @@ public final class CampusFixController {
 
         worker.execute(() -> {
             try {
-                User user = authentication.signIn(username, password).orElse(null);
+                User user = model.signIn(username, password).orElse(null);
                 updateWindow(() -> completeSignIn(user));
             } catch (SQLException | IllegalStateException exception) {
                 LOGGER.log(Level.WARNING, "Sign-in failed.", exception);
@@ -133,7 +123,7 @@ public final class CampusFixController {
         showCategoryStatus(progress, true);
         worker.execute(() -> {
             try {
-                var rows = categories.list(administrator).stream()
+                var rows = model.listCategories(administrator).stream()
                         .map(category -> new CategoryRow(category.id(), category.name(), category.active()))
                         .toList();
                 updateAccount(administrator, () -> {
@@ -167,16 +157,16 @@ public final class CampusFixController {
             try {
                 String message = switch (action) {
                     case ADD -> {
-                        categories.create(administrator, name);
+                        model.createCategory(administrator, name);
                         yield "Category added.";
                     }
                     case RENAME -> {
-                        categories.rename(administrator, selected.id(), name);
+                        model.renameCategory(administrator, selected.id(), name);
                         yield "Category renamed.";
                     }
                     case TOGGLE_ACTIVE -> {
                         boolean active = !selected.active();
-                        categories.setActive(administrator, selected.id(), active);
+                        model.setCategoryActive(administrator, selected.id(), active);
                         yield active ? "Category activated." : "Category deactivated.";
                     }
                 };
@@ -213,9 +203,9 @@ public final class CampusFixController {
         view.showReportStatus(loadingMessage, true);
         worker.execute(() -> {
             try {
-                var rows = reports.list(user).stream().map(presentation::toRow).toList();
+                var rows = model.listReports(user).stream().map(presentation::toRow).toList();
                 List<CategoryOption> categories = presentation.showsSubmissionForm()
-                        ? reports.activeCategories().stream()
+                        ? model.activeCategories().stream()
                                 .map(category -> new CategoryOption(category.id(), category.name())).toList()
                         : List.of();
                 updateAccount(user, () -> {
@@ -268,7 +258,7 @@ public final class CampusFixController {
     private final class NewReport implements ReportFormState {
         @Override
         public void save(User user, long categoryId, String title, String description, String location) {
-            executeReportCommand(user, () -> reports.submit(user, categoryId, title, description, location),
+            executeReportCommand(user, () -> model.submitReport(user, categoryId, title, description, location),
                     "Submitting report...", "Report submitted.", "Could not save the report.",
                     CampusFixController.this::resetReportForm);
         }
@@ -283,7 +273,7 @@ public final class CampusFixController {
 
         @Override
         public void save(User user, long categoryId, String title, String description, String location) {
-            executeReportCommand(user, () -> reports.edit(user, reportId, categoryId, title, description, location),
+            executeReportCommand(user, () -> model.editReport(user, reportId, categoryId, title, description, location),
                     "Saving report...", "Report updated.", "Could not save the report.",
                     CampusFixController.this::resetReportForm);
         }
@@ -304,7 +294,7 @@ public final class CampusFixController {
             return;
         }
 
-        executeReportCommand(user, () -> reports.cancel(user, report.id()),
+        executeReportCommand(user, () -> model.cancelReport(user, report.id()),
                 "Cancelling report...", "Report cancelled.", "Could not cancel the report.", () -> {
                     if (reportForm.edits(report.id())) {
                         resetReportForm();
@@ -326,11 +316,11 @@ public final class CampusFixController {
 
         if (resolving) {
             String note = view.resolutionNote();
-            executeReportCommand(user, () -> reports.resolve(user, report.id(), note),
+            executeReportCommand(user, () -> model.resolveReport(user, report.id(), note),
                     "Resolving report...", "Report resolved.", "Could not resolve the report.",
                     () -> view.clearResolutionNote(report.id()));
         } else {
-            executeReportCommand(user, () -> reports.startWork(user, report.id()),
+            executeReportCommand(user, () -> model.startWork(user, report.id()),
                     "Starting work...", "Work started.", "Could not start work.", null);
         }
     }
@@ -379,7 +369,7 @@ public final class CampusFixController {
         worker.execute(() -> {
             String message;
             try {
-                message = database.checkConnection()
+                message = model.checkConnection()
                         ? "Connected to PostgreSQL."
                         : "PostgreSQL returned an unexpected result.";
             } catch (SQLException exception) {
@@ -407,7 +397,7 @@ public final class CampusFixController {
         view.close();
         worker.execute(() -> {
             try {
-                database.close();
+                model.close();
             } catch (SQLException exception) {
                 LOGGER.log(Level.WARNING, "Database connection could not be closed.", exception);
             }

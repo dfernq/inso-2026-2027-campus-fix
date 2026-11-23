@@ -75,8 +75,8 @@ method. The first call loads the database settings from `.env` and creates the
 connection manager. Later calls return the same instance. The manager opens
 the JDBC connection on the first database operation.
 
-`Main` passes the manager to the Controller and DAOs. They receive their
-database dependency explicitly, so integration tests can supply a manager
+At this stage, `Main` passes the manager to the Controller and DAOs. The
+database dependency is explicit, so integration tests can supply a manager
 configured for `campusfix_test`. The Controller's worker still owns JDBC
 access and closes the connection when the window closes.
 
@@ -168,6 +168,24 @@ close the result set when the query finishes.
   report-summary mapper reuses the issue mapper and adds the reporter and
   category names from the join.
 
+### Give the Controller one Model entry point with Facade
+
+`CampusFix` provides the Model operations used by the Controller, including
+sign-in, report changes, category management, and connection checks. It
+assembles the DAOs and services around the connection manager supplied by
+`Main`. The Controller calls operations such as `resolveReport()` on the
+facade, which delegates to the service that applies the report rules.
+
+- **Correctness.** The facade assembles every DAO with the same connection
+  manager. The services continue to validate input and enforce permission
+  and status rules.
+- **Readability.** The Controller receives one Model dependency. Each call
+  names an application operation, and the service and DAO wiring lives in
+  the facade.
+- **Flexibility.** The Model can change how it assembles its services and
+  DAOs while preserving the operations used by the Controller. Services
+  and DAOs can still be tested directly.
+
 ## Architecture
 
 The `java/model` module contains database access without a UI dependency.
@@ -183,21 +201,20 @@ classDiagram
     Main ..> CampusFixController : creates
     Main ..> DesktopDatabase : gets instance
     DesktopDatabase --> DatabaseConnection : connection
-    Main ..> AuthenticationService : creates
-    Main ..> UserDao : creates
-    Main ..> IssueService : creates
-    Main ..> CategoryService : creates
-    Main ..> IssueDao : creates
-    Main ..> CategoryDao : creates
+    Main ..> CampusFix : creates
     CampusFixController --> CampusFixView : view
     CampusFixController ..> ReportPresentation : selects by role
     CampusFixController --> CategoryPanel : category view
     CampusFixView --> CategoryPanel : hosts
     CampusFixView --> ReportTableModel : report table adapter
-    CampusFixController --> DatabaseConnection : database
-    CampusFixController --> AuthenticationService : authentication
-    CampusFixController --> IssueService : reports
-    CampusFixController --> CategoryService : categories
+    CampusFixController --> CampusFix : model
+    CampusFix --> DatabaseConnection : database
+    CampusFix --> AuthenticationService : authentication
+    CampusFix --> IssueService : reports
+    CampusFix --> CategoryService : categories
+    CampusFix ..> UserDao : creates
+    CampusFix ..> IssueDao : creates
+    CampusFix ..> CategoryDao : creates
     AuthenticationService --> UserDao : users
     IssueService --> IssueDao : issues
     IssueService --> CategoryDao : categories
@@ -213,18 +230,20 @@ classDiagram
     CrudDao <|.. CategoryDao
 ```
 
-`Main` gets the shared `DatabaseConnection` from `DesktopDatabase` and passes
-it to the Controller and the three DAOs. The Controller creates the Views and
-binds `Runnable` callbacks for account, report, and category actions. The Views
-render data from the Controller and forward UI events through those callbacks.
+`Main` gets the connection manager from `DesktopDatabase`, creates the
+`CampusFix` facade, and passes it to the Controller. The Controller creates
+the Views and binds `Runnable` callbacks for account, report, and category
+actions. The Views render data from the Controller and forward UI events
+through those callbacks.
 
 | Class | Responsibility |
 | --- | --- |
-| `Main` | Get the connection manager, construct the Model objects, and start the Controller on Swing's event thread. |
+| `Main` | Get the connection manager, construct the facade, and start the Controller on Swing's event thread. |
 | `DesktopDatabase` | Load `.env` and provide one connection manager per desktop process. |
 | `CampusFixController` | Create the View, keep the signed-in user in memory, and run database operations on one worker. |
 | `CampusFixView` | Render the sign-in form, report form, and report list. |
 | `ReportTableModel` | Expose the report rows through Swing's table interface. |
+| `CampusFix` | Assemble the Model services and expose their application operations to the Controller. |
 | `AuthenticationService` | Authenticate the submitted credentials and return the user on success. |
 | `UserDao` | Implement account CRUD and username lookup with parameterized SQL. |
 | `IssueService` | Validate report changes, check permissions, and select the list for the signed-in role. |
