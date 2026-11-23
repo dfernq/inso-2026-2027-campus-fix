@@ -136,6 +136,22 @@ progress.
 - **Flexibility.** A change to a role's report controls stays in its strategy.
   The Activity and list adapter continue rendering the same state.
 
+### Share result-set handling with Template Method
+
+The DAOs prepare SQL and bind parameters. `RowMapper` executes the
+prepared statement and defines how to read a single result or a list.
+Each mapper implements `mapRow()` to turn the current row into an
+account, category, issue, or report summary.
+
+- **Correctness.** `queryOne()` returns an empty `Optional` for a missing row.
+  `queryAll()` preserves query order and returns an empty list for an empty
+  result. Both close the result set when mapping finishes or raises an error.
+- **Readability.** Each DAO keeps its query, parameters, and column mapping
+  together. Cursor traversal and result-set cleanup live in one class.
+- **Flexibility.** A new mapper can reuse the same query steps and implement
+  its own column conversion. The report summary mapper reuses the issue
+  mapper and adds the reporter and category names from the join.
+
 ## Architecture
 
 ```mermaid
@@ -163,6 +179,9 @@ classDiagram
     UserDao --> DatabaseConnection : database
     IssueDao --> DatabaseConnection : database
     CategoryDao --> DatabaseConnection : database
+    UserDao ..> RowMapper : account mapping
+    IssueDao ..> RowMapper : report mapping
+    CategoryDao ..> RowMapper : category mapping
     CrudDao <|.. UserDao
     CrudDao <|.. IssueDao
     CrudDao <|.. CategoryDao
