@@ -101,6 +101,24 @@ stay in the View layer. When only the busy state changes, the adapter
 updates the action buttons in place. It rebuilds the rows when their
 display data changes.
 
+### Give the report form explicit states
+
+The Activity keeps the draft values and the current form state. Choosing
+**Edit report** creates an `EditingReport` for the selected ID. The ViewModel
+delegates saving to that state, which runs an update. `NewReport` runs a
+submission. A successful save, discard, sign-out, or cancellation of the
+report being edited resets the form. A validation error preserves the draft.
+
+- **Correctness.** `EditingReport` keeps a fixed report ID. The Activity saves
+  it with the draft and reconstructs the state after rotation, so **Save
+  changes** still targets the same report. Cancelling a different report
+  leaves the edit intact.
+- **Readability.** The same named state drives the form heading and save
+  operation. Each state keeps its command and operation messages together.
+- **Flexibility.** Another form mode can implement `ReportFormState` and
+  reuse the ViewModel's command scheduling, validation feedback, and list
+  refresh. The Activity handles how to enter, display, and restore that mode.
+
 ## Architecture
 
 ```mermaid

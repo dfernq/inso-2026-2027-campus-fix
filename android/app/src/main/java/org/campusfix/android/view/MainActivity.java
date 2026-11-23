@@ -23,7 +23,10 @@ import org.campusfix.android.viewmodel.CampusFixViewModel;
 import org.campusfix.android.viewmodel.CampusFixViewModel.AccountDisplay;
 import org.campusfix.android.viewmodel.CampusFixViewModel.CategoriesState;
 import org.campusfix.android.viewmodel.CampusFixViewModel.CategoryOption;
+import org.campusfix.android.viewmodel.CampusFixViewModel.EditingReport;
+import org.campusfix.android.viewmodel.CampusFixViewModel.NewReport;
 import org.campusfix.android.viewmodel.CampusFixViewModel.ReportDisplay;
+import org.campusfix.android.viewmodel.CampusFixViewModel.ReportFormState;
 import org.campusfix.android.viewmodel.CampusFixViewModel.ReportsState;
 import org.campusfix.android.viewmodel.CampusFixViewModel.State;
 
@@ -72,7 +75,7 @@ public final class MainActivity extends ComponentActivity {
     private ArrayAdapter<String> categoryNames;
     private List<CategoryOption> displayedCategories = List.of();
     private long restoredCategoryId;
-    private long editingIssueId;
+    private ReportFormState reportFormState = new NewReport();
     private long resolvingIssueId;
     private long renderedSaveCount;
 
@@ -159,7 +162,7 @@ public final class MainActivity extends ComponentActivity {
         });
         submit.setOnClickListener(view -> {
             hideKeyboard(reportDescription);
-            viewModel.saveReport(editingIssueId, selectedCategoryId(), reportTitle.getText().toString(),
+            viewModel.saveReport(reportFormState, selectedCategoryId(), reportTitle.getText().toString(),
                     reportDescription.getText().toString(), reportLocation.getText().toString());
         });
         discardEdit.setOnClickListener(view -> {
@@ -245,7 +248,7 @@ public final class MainActivity extends ComponentActivity {
         reportForm.setVisibility(account.canSubmit() ? View.VISIBLE : View.GONE);
 
         boolean saved = renderedSaveCount != reports.savedDraftCount();
-        boolean draftWasCancelled = editingIssueId != 0 && editingIssueId == reports.cancelledIssueId();
+        boolean draftWasCancelled = reportFormState.edits(reports.cancelledIssueId());
         if (saved || draftWasCancelled) {
             renderedSaveCount = reports.savedDraftCount();
             clearDraft();
@@ -332,7 +335,7 @@ public final class MainActivity extends ComponentActivity {
     }
 
     private void showReportForEditing(ReportDisplay report) {
-        editingIssueId = report.id();
+        reportFormState = new EditingReport(report.id());
         reportTitle.setText(report.title());
         reportLocation.setText(report.location());
         reportDescription.setText(report.description());
@@ -351,20 +354,19 @@ public final class MainActivity extends ComponentActivity {
     }
 
     private void renderDraftMode() {
-        if (editingIssueId == 0) {
+        if (reportFormState instanceof EditingReport editing) {
+            reportFormHeading.setText(getString(R.string.edit_report_heading, editing.reportId()));
+            submit.setText(R.string.save_report_changes);
+            discardEdit.setVisibility(View.VISIBLE);
+        } else {
             reportFormHeading.setText(R.string.new_report);
             submit.setText(R.string.submit_report);
             discardEdit.setVisibility(View.GONE);
-            return;
         }
-
-        reportFormHeading.setText(getString(R.string.edit_report_heading, editingIssueId));
-        submit.setText(R.string.save_report_changes);
-        discardEdit.setVisibility(View.VISIBLE);
     }
 
     private void clearDraft() {
-        editingIssueId = 0;
+        reportFormState = new NewReport();
         reportTitle.getText().clear();
         reportLocation.getText().clear();
         reportDescription.getText().clear();
@@ -381,7 +383,10 @@ public final class MainActivity extends ComponentActivity {
         reportLocation.setText(savedInstanceState.getString(DRAFT_LOCATION, ""));
         reportDescription.setText(savedInstanceState.getString(DRAFT_DESCRIPTION, ""));
         restoredCategoryId = savedInstanceState.getLong(DRAFT_CATEGORY);
-        editingIssueId = savedInstanceState.getLong(DRAFT_ISSUE);
+        long restoredReportId = savedInstanceState.getLong(DRAFT_ISSUE);
+        if (restoredReportId != 0) {
+            reportFormState = new EditingReport(restoredReportId);
+        }
         renderedSaveCount = savedInstanceState.getLong(RENDERED_SAVE_COUNT);
         resolvingIssueId = savedInstanceState.getLong(RESOLUTION_ISSUE);
         resolutionNote.setText(savedInstanceState.getString(RESOLUTION_NOTE, ""));
@@ -395,7 +400,9 @@ public final class MainActivity extends ComponentActivity {
         outState.putString(DRAFT_LOCATION, reportLocation.getText().toString());
         outState.putString(DRAFT_DESCRIPTION, reportDescription.getText().toString());
         outState.putLong(DRAFT_CATEGORY, selectedCategoryId());
-        outState.putLong(DRAFT_ISSUE, editingIssueId);
+        if (reportFormState instanceof EditingReport editing) {
+            outState.putLong(DRAFT_ISSUE, editing.reportId());
+        }
         outState.putLong(RENDERED_SAVE_COUNT, renderedSaveCount);
         outState.putLong(RESOLUTION_ISSUE, resolvingIssueId);
         outState.putString(RESOLUTION_NOTE, resolutionNote.getText().toString());

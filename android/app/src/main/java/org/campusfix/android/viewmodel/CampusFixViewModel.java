@@ -95,6 +95,41 @@ public final class CampusFixViewModel extends ViewModel {
         }
     }
 
+    public interface ReportFormState {
+        void save(CampusFixViewModel viewModel, long categoryId, String title, String description, String location);
+
+        default boolean edits(long reportId) {
+            return false;
+        }
+    }
+
+    public record NewReport() implements ReportFormState {
+        @Override
+        public void save(CampusFixViewModel viewModel, long categoryId, String title,
+                         String description, String location) {
+            viewModel.executeReportCommand(
+                    user -> viewModel.issues().submit(user, categoryId, title, description, location),
+                    R.string.report_submitting, R.string.report_submitted,
+                    R.string.report_save_failed, R.string.report_submitted_refresh_failed, ReportsState::afterSave);
+        }
+    }
+
+    public record EditingReport(long reportId) implements ReportFormState {
+        @Override
+        public void save(CampusFixViewModel viewModel, long categoryId, String title,
+                         String description, String location) {
+            viewModel.executeReportCommand(
+                    user -> viewModel.issues().edit(user, reportId, categoryId, title, description, location),
+                    R.string.report_saving, R.string.report_updated,
+                    R.string.report_save_failed, R.string.report_updated_refresh_failed, ReportsState::afterSave);
+        }
+
+        @Override
+        public boolean edits(long reportId) {
+            return this.reportId == reportId;
+        }
+    }
+
     public record CategoryDisplay(long id, String name, boolean active) {
     }
 
@@ -326,16 +361,8 @@ public final class CampusFixViewModel extends ViewModel {
         loadReports(signedInUser, reports);
     }
 
-    public void saveReport(long issueId, long categoryId, String title, String description, String location) {
-        if (issueId == 0) {
-            executeReportCommand(user -> issues().submit(user, categoryId, title, description, location),
-                    R.string.report_submitting, R.string.report_submitted,
-                    R.string.report_save_failed, R.string.report_submitted_refresh_failed, ReportsState::afterSave);
-        } else {
-            executeReportCommand(user -> issues().edit(user, issueId, categoryId, title, description, location),
-                    R.string.report_saving, R.string.report_updated,
-                    R.string.report_save_failed, R.string.report_updated_refresh_failed, ReportsState::afterSave);
-        }
+    public void saveReport(ReportFormState form, long categoryId, String title, String description, String location) {
+        form.save(this, categoryId, title, description, location);
     }
 
     public void cancelReport(long issueId) {
