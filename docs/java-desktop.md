@@ -133,6 +133,24 @@ A validation error keeps the state and draft available for correction.
   save behavior. The Controller defines when to enter and leave that state,
   and the state can reuse the existing command scheduling and error handling.
 
+### Choose the report presentation by role
+
+The Controller uses the **Strategy** pattern to prepare the report screen.
+It selects a `ReportPresentation` for the signed-in role. The regular
+strategy shows the submission form and enables editing or cancellation for
+open reports. The administrator strategy offers **Start work** for open
+reports and **Resolve report** for reports in progress.
+
+- **Correctness.** One strategy determines the report form and action flags
+  for each role. The Model still decides which reports the user can see and
+  checks permissions and status when a report change is requested.
+- **Readability.** The Controller handles loading and refresh. The strategy
+  keeps each role's status checks together and uses the same row conversion
+  for both roles.
+- **Flexibility.** A change to a role's report controls belongs in its
+  strategy. The worker, refresh flow, and Swing table can use the same
+  interfaces as those rules evolve.
+
 ## Architecture
 
 The `java/model` module contains database access without a UI dependency.
@@ -155,6 +173,7 @@ classDiagram
     Main ..> IssueDao : creates
     Main ..> CategoryDao : creates
     CampusFixController --> CampusFixView : view
+    CampusFixController ..> ReportPresentation : selects by role
     CampusFixController --> CategoryPanel : category view
     CampusFixView --> CategoryPanel : hosts
     CampusFixView --> ReportTableModel : report table adapter

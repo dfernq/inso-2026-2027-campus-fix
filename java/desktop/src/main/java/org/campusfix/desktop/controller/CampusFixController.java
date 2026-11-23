@@ -10,7 +10,6 @@ import java.util.logging.Logger;
 import javax.swing.SwingUtilities;
 import org.campusfix.desktop.view.CampusFixView;
 import org.campusfix.desktop.view.CampusFixView.CategoryOption;
-import org.campusfix.desktop.view.CampusFixView.ReportRow;
 import org.campusfix.desktop.view.CategoryPanel;
 import org.campusfix.desktop.view.CategoryPanel.CategoryRow;
 import org.campusfix.model.auth.AuthenticationService;
@@ -89,9 +88,8 @@ public final class CampusFixController {
             return;
         }
         signedInUser = user;
-        boolean regular = user.role() == User.Role.REGULAR;
-        String title = regular ? "Regular account" : "Administrator account";
-        view.showAccount(title, user.username(), regular);
+        var presentation = ReportPresentation.forRole(user.role());
+        view.showAccount(presentation.accountTitle(), user.username(), presentation.showsSubmissionForm());
         refreshReports();
     }
 
@@ -211,11 +209,12 @@ public final class CampusFixController {
         if (user == null) {
             return;
         }
+        var presentation = ReportPresentation.forRole(user.role());
         view.showReportStatus(loadingMessage, true);
         worker.execute(() -> {
             try {
-                var rows = reports.list(user).stream().map(report -> reportRow(user, report)).toList();
-                List<CategoryOption> categories = user.role() == User.Role.REGULAR
+                var rows = reports.list(user).stream().map(presentation::toRow).toList();
+                List<CategoryOption> categories = presentation.showsSubmissionForm()
                         ? reports.activeCategories().stream()
                                 .map(category -> new CategoryOption(category.id(), category.name())).toList()
                         : List.of();
@@ -365,18 +364,6 @@ public final class CampusFixController {
     private void refreshAfterChange(String message) {
         loadReports(String.format("%s Refreshing...", message), message,
                 String.format("%s Could not refresh reports.", message));
-    }
-
-    private static ReportRow reportRow(User viewer, Issue.Summary report) {
-        var issue = report.issue();
-        boolean admin = viewer.role() == User.Role.ADMIN;
-        boolean open = issue.status() == Issue.Status.OPEN;
-        boolean canManage = viewer.role() == User.Role.REGULAR && open;
-        boolean canStartWork = admin && open;
-        boolean canResolve = admin && issue.status() == Issue.Status.IN_PROGRESS;
-        return new ReportRow(issue.id(), issue.title(), issue.categoryId(), report.categoryName(),
-                issue.location(), report.reporterName(), issue.status().name(),
-                issue.description(), issue.resolutionNote(), canManage, canStartWork, canResolve);
     }
 
     private void updateAccount(User user, Runnable update) {
