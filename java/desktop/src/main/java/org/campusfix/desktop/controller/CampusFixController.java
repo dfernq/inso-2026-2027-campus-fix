@@ -5,6 +5,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.swing.SwingUtilities;
@@ -13,6 +14,7 @@ import org.campusfix.desktop.view.CampusFixView.CategoryOption;
 import org.campusfix.desktop.view.CategoryPanel;
 import org.campusfix.desktop.view.CategoryPanel.CategoryRow;
 import org.campusfix.model.CampusFix;
+import org.campusfix.model.ModelChange;
 import org.campusfix.model.domain.Issue;
 import org.campusfix.model.domain.User;
 
@@ -23,6 +25,7 @@ public final class CampusFixController {
     private final CampusFixView view;
     private final CategoryPanel categoryPanel;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final Consumer<ModelChange> modelListener = this::onModelChange;
     private User signedInUser;
     private ReportFormState reportForm = new NewReport();
     private boolean managingCategories;
@@ -47,6 +50,7 @@ public final class CampusFixController {
         view.onStartWork(() -> advanceReport(Issue.Status.IN_PROGRESS));
         view.onResolveReport(() -> advanceReport(Issue.Status.RESOLVED));
         view.onClose(this::close);
+        model.addChangeListener(modelListener);
     }
 
     public void start() {
@@ -155,27 +159,11 @@ public final class CampusFixController {
         showCategoryStatus("Saving category...", true);
         worker.execute(() -> {
             try {
-                String message = switch (action) {
-                    case ADD -> {
-                        model.createCategory(administrator, name);
-                        yield "Category added.";
-                    }
-                    case RENAME -> {
-                        model.renameCategory(administrator, selected.id(), name);
-                        yield "Category renamed.";
-                    }
-                    case TOGGLE_ACTIVE -> {
-                        boolean active = !selected.active();
-                        model.setCategoryActive(administrator, selected.id(), active);
-                        yield active ? "Category activated." : "Category deactivated.";
-                    }
-                };
-                updateAccount(administrator, () -> {
-                    if (action == CategoryAction.ADD) {
-                        categoryPanel.clearNewName();
-                    }
-                    loadCategories(message);
-                });
+                switch (action) {
+                    case ADD -> model.createCategory(administrator, name);
+                    case RENAME -> model.renameCategory(administrator, selected.id(), name);
+                    case TOGGLE_ACTIVE -> model.setCategoryActive(administrator, selected.id(), !selected.active());
+                }
             } catch (IllegalArgumentException exception) {
                 updateAccount(administrator, () -> showCategoryStatus(exception.getMessage(), false));
             } catch (SQLException exception) {
@@ -259,8 +247,7 @@ public final class CampusFixController {
         @Override
         public void save(User user, long categoryId, String title, String description, String location) {
             executeReportCommand(user, () -> model.submitReport(user, categoryId, title, description, location),
-                    "Submitting report...", "Report submitted.", "Could not save the report.",
-                    CampusFixController.this::resetReportForm);
+                    "Submitting report...", "Could not save the report.");
         }
     }
 
@@ -274,8 +261,7 @@ public final class CampusFixController {
         @Override
         public void save(User user, long categoryId, String title, String description, String location) {
             executeReportCommand(user, () -> model.editReport(user, reportId, categoryId, title, description, location),
-                    "Saving report...", "Report updated.", "Could not save the report.",
-                    CampusFixController.this::resetReportForm);
+                    "Saving report...", "Could not save the report.");
         }
 
         @Override
@@ -295,11 +281,7 @@ public final class CampusFixController {
         }
 
         executeReportCommand(user, () -> model.cancelReport(user, report.id()),
-                "Cancelling report...", "Report cancelled.", "Could not cancel the report.", () -> {
-                    if (reportForm.edits(report.id())) {
-                        resetReportForm();
-                    }
-                });
+                "Cancelling report...", "Could not cancel the report.");
     }
 
     private void advanceReport(Issue.Status targetStatus) {
@@ -317,11 +299,10 @@ public final class CampusFixController {
         if (resolving) {
             String note = view.resolutionNote();
             executeReportCommand(user, () -> model.resolveReport(user, report.id(), note),
-                    "Resolving report...", "Report resolved.", "Could not resolve the report.",
-                    () -> view.clearResolutionNote(report.id()));
+                    "Resolving report...", "Could not resolve the report.");
         } else {
             executeReportCommand(user, () -> model.startWork(user, report.id()),
-                    "Starting work...", "Work started.", "Could not start work.", null);
+                    "Starting work...", "Could not start work.");
         }
     }
 
@@ -331,17 +312,11 @@ public final class CampusFixController {
     }
 
     private void executeReportCommand(User user, ReportCommand command, String progressMessage,
-                                      String successMessage, String failureMessage, Runnable afterSuccess) {
+                                      String failureMessage) {
         view.showReportStatus(progressMessage, true);
         worker.execute(() -> {
             try {
                 command.execute();
-                updateAccount(user, () -> {
-                    if (afterSuccess != null) {
-                        afterSuccess.run();
-                    }
-                    refreshAfterChange(successMessage);
-                });
             } catch (IllegalArgumentException exception) {
                 updateAccount(user, () -> view.showReportStatus(exception.getMessage(), false));
             } catch (SQLException exception) {
@@ -349,6 +324,54 @@ public final class CampusFixController {
                 updateAccount(user, () -> view.showReportStatus(failureMessage, false));
             }
         });
+    }
+
+    private void onModelChange(ModelChange change) {
+        updateAccount(change.actor(), () -> {
+            if (change instanceof ModelChange.ReportChanged report) {
+                onReportChanged(report);
+            } else if (change instanceof ModelChange.CategoryChanged category) {
+                onCategoryChanged(category);
+            }
+        });
+    }
+
+    private void onReportChanged(ModelChange.ReportChanged change) {
+        String message = switch (change.kind()) {
+            case SUBMITTED -> {
+                resetReportForm();
+                yield "Report submitted.";
+            }
+            case EDITED -> {
+                resetReportForm();
+                yield "Report updated.";
+            }
+            case CANCELLED -> {
+                if (reportForm.edits(change.reportId())) {
+                    resetReportForm();
+                }
+                yield "Report cancelled.";
+            }
+            case WORK_STARTED -> "Work started.";
+            case RESOLVED -> {
+                view.clearResolutionNote(change.reportId());
+                yield "Report resolved.";
+            }
+        };
+        refreshAfterChange(message);
+    }
+
+    private void onCategoryChanged(ModelChange.CategoryChanged change) {
+        String message = switch (change.kind()) {
+            case ADDED -> {
+                categoryPanel.clearNewName();
+                yield "Category added.";
+            }
+            case RENAMED -> "Category renamed.";
+            case ACTIVATED -> "Category activated.";
+            case DEACTIVATED -> "Category deactivated.";
+        };
+        loadCategories(message);
     }
 
     private void refreshAfterChange(String message) {
@@ -394,6 +417,7 @@ public final class CampusFixController {
             return;
         }
         closing = true;
+        model.removeChangeListener(modelListener);
         view.close();
         worker.execute(() -> {
             try {

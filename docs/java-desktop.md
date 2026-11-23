@@ -89,17 +89,11 @@ and note on Swing's event thread. The worker runs the command, which calls
 `IssueService.resolve` with those captured values. The Model still validates
 the note and checks whether the report can be resolved.
 
-Submission, editing, cancellation, starting work, and resolution all use
-`executeReportCommand`. It shows progress, queues the work, and handles
-completion on Swing's event thread. It refreshes the list after a successful
-change, shows validation or database errors, and applies feedback only to
-the account that requested the change. Each action supplies its own messages
-and any cleanup it needs. For example, resolution clears the draft note after
-the write succeeds, so a validation error leaves the note available to edit.
-
-This keeps worker scheduling and error handling in one place. Changes to
-that flow apply to every report action, while each action keeps its own
-inputs and completion behavior.
+At this stage, all five report actions use `executeReportCommand` for
+progress, worker scheduling, and completion. Each action supplies its
+messages and any cleanup. For example, resolution clears the draft note
+after the write succeeds, so a validation error leaves the note available
+to edit. Feedback applies only to the account that requested the change.
 
 ### Adapt report rows for the Swing table
 
@@ -128,7 +122,7 @@ A validation error keeps the state and draft available for correction.
   a cancellation should clear the draft.
 - **Readability.** The state names make the form mode explicit. The Controller
   calls `reportForm.save(...)`, and each state keeps its Model operation next
-  to its progress and completion messages.
+  to its progress and error messages.
 - **Flexibility.** A new form mode can implement `ReportFormState` with its own
   save behavior. The Controller defines when to enter and leave that state,
   and the state can reuse the existing command scheduling and error handling.
@@ -186,6 +180,25 @@ facade, which delegates to the service that applies the report rules.
   DAOs while preserving the operations used by the Controller. Services
   and DAOs can still be tested directly.
 
+### Refresh the desktop View using Observer
+
+The `CampusFix` facade publishes a `ModelChange` after a report or category
+write succeeds. The Controller registers a listener when it creates the
+View and removes it when the window closes. It handles notifications on
+Swing's event thread, shows the result, and queues a fresh list query on the
+database worker. Writes from other clients are picked up with **Refresh**.
+
+- **Correctness.** A rejected or failed write sends no change event, so
+  validation feedback keeps the draft available. The Controller only applies
+  an event to the same sign-in session. A report event carries the report ID,
+  so cancelling a different report leaves the current edit intact.
+- **Readability.** Commands handle progress and errors. The Controller's
+  change handlers keep the success messages, draft cleanup, and refresh
+  together. The facade publishes what changed without any Swing dependency.
+- **Flexibility.** Another listener can react to the same change without a
+  new dependency in the Model or a change to the service that performs the
+  write. The Controller decides how to present the result in Swing.
+
 ## Architecture
 
 The `java/model` module contains database access without a UI dependency.
@@ -207,7 +220,9 @@ classDiagram
     CampusFixController --> CategoryPanel : category view
     CampusFixView --> CategoryPanel : hosts
     CampusFixView --> ReportTableModel : report table adapter
-    CampusFixController --> CampusFix : model
+    CampusFixController --> CampusFix : calls and subscribes
+    CampusFixController ..> ModelChange : handles
+    CampusFix ..> ModelChange : publishes
     CampusFix --> DatabaseConnection : database
     CampusFix --> AuthenticationService : authentication
     CampusFix --> IssueService : reports
@@ -234,7 +249,8 @@ classDiagram
 `CampusFix` facade, and passes it to the Controller. The Controller creates
 the Views and binds `Runnable` callbacks for account, report, and category
 actions. The Views render data from the Controller and forward UI events
-through those callbacks.
+through those callbacks. The Controller listens for Model changes and
+reloads the affected list for the current account.
 
 | Class | Responsibility |
 | --- | --- |
@@ -243,7 +259,8 @@ through those callbacks.
 | `CampusFixController` | Create the View, keep the signed-in user in memory, and run database operations on one worker. |
 | `CampusFixView` | Render the sign-in form, report form, and report list. |
 | `ReportTableModel` | Expose the report rows through Swing's table interface. |
-| `CampusFix` | Assemble the Model services and expose their application operations to the Controller. |
+| `CampusFix` | Assemble the Model services, expose application operations, and publish successful writes. |
+| `ModelChange` | Describe a successful report or category write for Model listeners. |
 | `AuthenticationService` | Authenticate the submitted credentials and return the user on success. |
 | `UserDao` | Implement account CRUD and username lookup with parameterized SQL. |
 | `IssueService` | Validate report changes, check permissions, and select the list for the signed-in role. |
