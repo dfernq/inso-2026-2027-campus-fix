@@ -1,12 +1,22 @@
 package org.campusfix.model.persistence;
 
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Optional;
 import org.campusfix.model.domain.User;
 
 public final class UserDao implements CrudDao<UserDao.Account> {
     private static final String ACCOUNT_COLUMNS = "id, username, role, password_salt, password_hash";
+
+    private static final RowMapper<Account> ACCOUNT_MAPPER = new RowMapper<>() {
+        @Override
+        Account mapRow(ResultSet row) throws SQLException {
+            var user = new User(row.getLong("id"), row.getString("username"),
+                    User.Role.valueOf(row.getString("role")));
+            return new Account(user, row.getBytes("password_salt"), row.getBytes("password_hash"));
+        }
+    };
 
     public record Account(User user, byte[] salt, byte[] passwordHash) {
     }
@@ -26,7 +36,8 @@ public final class UserDao implements CrudDao<UserDao.Account> {
                 """, ACCOUNT_COLUMNS);
         try (var statement = database.getConnection().prepareStatement(sql)) {
             bindAccount(statement, account);
-            return queryAccount(statement).orElseThrow(() -> new SQLException("Insert returned no account."));
+            return ACCOUNT_MAPPER.queryOne(statement)
+                    .orElseThrow(() -> new SQLException("Insert returned no account."));
         }
     }
 
@@ -35,7 +46,7 @@ public final class UserDao implements CrudDao<UserDao.Account> {
         String sql = String.format("SELECT %s FROM users WHERE id = ?", ACCOUNT_COLUMNS);
         try (var statement = database.getConnection().prepareStatement(sql)) {
             statement.setLong(1, id);
-            return queryAccount(statement);
+            return ACCOUNT_MAPPER.queryOne(statement);
         }
     }
 
@@ -65,7 +76,7 @@ public final class UserDao implements CrudDao<UserDao.Account> {
         String sql = String.format("SELECT %s FROM users WHERE username = ?", ACCOUNT_COLUMNS);
         try (var statement = database.getConnection().prepareStatement(sql)) {
             statement.setString(1, username);
-            return queryAccount(statement);
+            return ACCOUNT_MAPPER.queryOne(statement);
         }
     }
 
@@ -74,16 +85,5 @@ public final class UserDao implements CrudDao<UserDao.Account> {
         statement.setString(2, account.user().role().name());
         statement.setBytes(3, account.salt());
         statement.setBytes(4, account.passwordHash());
-    }
-
-    private static Optional<Account> queryAccount(PreparedStatement statement) throws SQLException {
-        try (var row = statement.executeQuery()) {
-            if (!row.next()) {
-                return Optional.empty();
-            }
-            var user = new User(row.getLong("id"), row.getString("username"),
-                    User.Role.valueOf(row.getString("role")));
-            return Optional.of(new Account(user, row.getBytes("password_salt"), row.getBytes("password_hash")));
-        }
     }
 }

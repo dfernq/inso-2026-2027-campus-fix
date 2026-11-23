@@ -151,6 +151,23 @@ reports and **Resolve report** for reports in progress.
   strategy. The worker, refresh flow, and Swing table can use the same
   interfaces as those rules evolve.
 
+### Share result-set handling with Template Method
+
+A DAO prepares its SQL and binds the parameters. `RowMapper` defines the
+fixed steps for queries that return rows. `queryOne()` reads the first row
+into an `Optional`, and `queryAll()` walks the result set in query order.
+Both call the mapper's `mapRow()` method to convert the current row and
+close the result set when the query finishes.
+
+- **Correctness.** The templates handle empty results consistently and close
+  the result set even if a mapper throws. Each DAO closes its prepared
+  statements through try-with-resources.
+- **Readability.** SQL and parameters stay visible in the DAO alongside the
+  code that maps its columns. The cursor traversal lives in one class.
+- **Flexibility.** A new mapper supplies only its column conversion. The
+  report-summary mapper reuses the issue mapper and adds the reporter and
+  category names from the join.
+
 ## Architecture
 
 The `java/model` module contains database access without a UI dependency.
@@ -188,6 +205,9 @@ classDiagram
     UserDao --> DatabaseConnection : database
     IssueDao --> DatabaseConnection : database
     CategoryDao --> DatabaseConnection : database
+    UserDao ..> RowMapper : account mapping
+    IssueDao ..> RowMapper : report mapping
+    CategoryDao ..> RowMapper : category mapping
     CrudDao <|.. UserDao
     CrudDao <|.. IssueDao
     CrudDao <|.. CategoryDao

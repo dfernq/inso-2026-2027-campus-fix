@@ -1,9 +1,7 @@
 package org.campusfix.model.persistence;
 
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.campusfix.model.domain.Issue;
@@ -17,6 +15,23 @@ public final class IssueDao implements CrudDao<Issue> {
             JOIN users u ON u.id = i.reporter_id
             JOIN categories c ON c.id = i.category_id
             """;
+
+    private static final RowMapper<Issue> ISSUE_MAPPER = new RowMapper<>() {
+        @Override
+        Issue mapRow(ResultSet row) throws SQLException {
+            return new Issue(row.getLong("id"), row.getLong("reporter_id"), row.getLong("category_id"),
+                    row.getString("title"), row.getString("description"), row.getString("location"),
+                    Issue.Status.valueOf(row.getString("status")), row.getString("resolution_note"));
+        }
+    };
+
+    private static final RowMapper<Issue.Summary> SUMMARY_MAPPER = new RowMapper<>() {
+        @Override
+        Issue.Summary mapRow(ResultSet row) throws SQLException {
+            return new Issue.Summary(ISSUE_MAPPER.mapRow(row),
+                    row.getString("reporter_name"), row.getString("category_name"));
+        }
+    };
 
     private final DatabaseConnection database;
 
@@ -39,7 +54,7 @@ public final class IssueDao implements CrudDao<Issue> {
             statement.setString(5, issue.status().name());
             statement.setString(6, issue.resolutionNote());
             statement.setLong(7, issue.categoryId());
-            return queryIssue(statement)
+            return ISSUE_MAPPER.queryOne(statement)
                     .orElseThrow(() -> new IllegalArgumentException("Select an active category."));
         }
     }
@@ -52,7 +67,7 @@ public final class IssueDao implements CrudDao<Issue> {
                 """;
         try (var statement = database.getConnection().prepareStatement(sql)) {
             statement.setLong(1, id);
-            return queryIssue(statement);
+            return ISSUE_MAPPER.queryOne(statement);
         }
     }
 
@@ -138,7 +153,7 @@ public final class IssueDao implements CrudDao<Issue> {
     public List<Issue.Summary> findAll() throws SQLException {
         String sql = String.format("%s ORDER BY i.id DESC", REPORT_QUERY);
         try (var statement = database.getConnection().prepareStatement(sql)) {
-            return queryReports(statement);
+            return SUMMARY_MAPPER.queryAll(statement);
         }
     }
 
@@ -146,30 +161,7 @@ public final class IssueDao implements CrudDao<Issue> {
         String sql = String.format("%s WHERE i.reporter_id = ? ORDER BY i.id DESC", REPORT_QUERY);
         try (var statement = database.getConnection().prepareStatement(sql)) {
             statement.setLong(1, reporterId);
-            return queryReports(statement);
+            return SUMMARY_MAPPER.queryAll(statement);
         }
-    }
-
-    private static Optional<Issue> queryIssue(PreparedStatement statement) throws SQLException {
-        try (var rows = statement.executeQuery()) {
-            return rows.next() ? Optional.of(mapIssue(rows)) : Optional.empty();
-        }
-    }
-
-    private static List<Issue.Summary> queryReports(PreparedStatement statement) throws SQLException {
-        try (var rows = statement.executeQuery()) {
-            var issues = new ArrayList<Issue.Summary>();
-            while (rows.next()) {
-                issues.add(new Issue.Summary(mapIssue(rows),
-                        rows.getString("reporter_name"), rows.getString("category_name")));
-            }
-            return issues;
-        }
-    }
-
-    private static Issue mapIssue(ResultSet row) throws SQLException {
-        return new Issue(row.getLong("id"), row.getLong("reporter_id"), row.getLong("category_id"),
-                row.getString("title"), row.getString("description"), row.getString("location"),
-                Issue.Status.valueOf(row.getString("status")), row.getString("resolution_note"));
     }
 }
