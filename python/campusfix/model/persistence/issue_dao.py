@@ -1,8 +1,9 @@
-from psycopg.rows import DictRow, dict_row
+from psycopg.rows import DictRow
 
 from campusfix.model.domain.issue import Issue, IssueSummary, Status
 from campusfix.model.persistence.crud_dao import CrudDao
 from campusfix.model.persistence.database_connection import DatabaseConnection
+from campusfix.model.persistence.row_mapper import RowMapper
 
 
 _REPORT_QUERY = """
@@ -13,6 +14,29 @@ _REPORT_QUERY = """
     JOIN users u ON u.id = i.reporter_id
     JOIN categories c ON c.id = i.category_id
 """
+
+
+class _IssueMapper(RowMapper[Issue]):
+    def map_row(self, row: DictRow) -> Issue:
+        return Issue(
+            row["id"],
+            row["reporter_id"],
+            row["category_id"],
+            row["title"],
+            row["description"],
+            row["location"],
+            Status(row["status"]),
+            row["resolution_note"],
+        )
+
+
+class _SummaryMapper(RowMapper[IssueSummary]):
+    def map_row(self, row: DictRow) -> IssueSummary:
+        return IssueSummary(_ISSUE_MAPPER.map_row(row), row["reporter_name"], row["category_name"])
+
+
+_ISSUE_MAPPER = _IssueMapper()
+_SUMMARY_MAPPER = _SummaryMapper()
 
 
 class IssueDao(CrudDao[Issue]):
@@ -35,7 +59,7 @@ class IssueDao(CrudDao[Issue]):
             issue.resolution_note,
             issue.category_id,
         )
-        created = self._query_issue(query, parameters)
+        created = _ISSUE_MAPPER.query_one(self._database, query, parameters)
         if created is None:
             raise ValueError("Select an active category.")
         return created
@@ -45,7 +69,7 @@ class IssueDao(CrudDao[Issue]):
             SELECT id, reporter_id, category_id, title, description, location, status, resolution_note
             FROM issues WHERE id = %s
         """
-        return self._query_issue(query, (entity_id,))
+        return _ISSUE_MAPPER.query_one(self._database, query, (entity_id,))
 
     def update(self, issue: Issue) -> bool:
         query = """
@@ -119,41 +143,9 @@ class IssueDao(CrudDao[Issue]):
             return cursor.rowcount == 1
 
     def find_all(self) -> list[IssueSummary]:
-        return self._query_reports(f"{_REPORT_QUERY} ORDER BY i.id DESC", ())
+        query = f"{_REPORT_QUERY} ORDER BY i.id DESC"
+        return _SUMMARY_MAPPER.query_all(self._database, query)
 
     def find_by_reporter(self, reporter_id: int) -> list[IssueSummary]:
         query = f"{_REPORT_QUERY} WHERE i.reporter_id = %s ORDER BY i.id DESC"
-        return self._query_reports(query, (reporter_id,))
-
-    def _query_issue(
-        self, query: str, parameters: tuple[int | str | None, ...]
-    ) -> Issue | None:
-        with self._database.get_connection().cursor(row_factory=dict_row) as cursor:
-            cursor.execute(query, parameters)
-            row = cursor.fetchone()
-        return self._map_issue(row) if row is not None else None
-
-    def _query_reports(
-        self, query: str, parameters: tuple[int, ...]
-    ) -> list[IssueSummary]:
-        with self._database.get_connection().cursor(row_factory=dict_row) as cursor:
-            cursor.execute(query, parameters)
-            return [
-                IssueSummary(
-                    self._map_issue(row), row["reporter_name"], row["category_name"]
-                )
-                for row in cursor
-            ]
-
-    @staticmethod
-    def _map_issue(row: DictRow) -> Issue:
-        return Issue(
-            row["id"],
-            row["reporter_id"],
-            row["category_id"],
-            row["title"],
-            row["description"],
-            row["location"],
-            Status(row["status"]),
-            row["resolution_note"],
-        )
+        return _SUMMARY_MAPPER.query_all(self._database, query, (reporter_id,))

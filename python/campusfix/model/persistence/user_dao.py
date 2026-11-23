@@ -1,10 +1,12 @@
 from dataclasses import dataclass, field
 
 import psycopg
+from psycopg.rows import DictRow
 
 from campusfix.model.domain.user import Role, User
 from campusfix.model.persistence.crud_dao import CrudDao
 from campusfix.model.persistence.database_connection import DatabaseConnection
+from campusfix.model.persistence.row_mapper import RowMapper
 
 
 _ACCOUNT_COLUMNS = "id, username, role, password_salt, password_hash"
@@ -17,6 +19,15 @@ class Account:
     password_hash: bytes = field(repr=False)
 
 
+class _AccountMapper(RowMapper[Account]):
+    def map_row(self, row: DictRow) -> Account:
+        user = User(row["id"], row["username"], Role(row["role"]))
+        return Account(user, row["password_salt"], row["password_hash"])
+
+
+_ACCOUNT_MAPPER = _AccountMapper()
+
+
 class UserDao(CrudDao[Account]):
     def __init__(self, database: DatabaseConnection) -> None:
         self._database = database
@@ -27,14 +38,14 @@ class UserDao(CrudDao[Account]):
             VALUES (%s, %s, %s, %s)
             RETURNING {_ACCOUNT_COLUMNS}
         """
-        created = self._query_account(query, self._account_values(account))
+        created = _ACCOUNT_MAPPER.query_one(self._database, query, self._account_values(account))
         if created is None:
             raise psycopg.DatabaseError("Insert returned no account.")
         return created
 
     def read(self, entity_id: int) -> Account | None:
         query = f"SELECT {_ACCOUNT_COLUMNS} FROM users WHERE id = %s"
-        return self._query_account(query, (entity_id,))
+        return _ACCOUNT_MAPPER.query_one(self._database, query, (entity_id,))
 
     def update(self, account: Account) -> bool:
         query = """
@@ -53,18 +64,7 @@ class UserDao(CrudDao[Account]):
 
     def find_by_username(self, username: str) -> Account | None:
         query = f"SELECT {_ACCOUNT_COLUMNS} FROM users WHERE username = %s"
-        return self._query_account(query, (username,))
-
-    def _query_account(
-        self, query: str, parameters: tuple[int | str | bytes, ...]
-    ) -> Account | None:
-        with self._database.get_connection().cursor() as cursor:
-            cursor.execute(query, parameters)
-            row = cursor.fetchone()
-        if row is None:
-            return None
-        user_id, username, role, salt, password_hash = row
-        return Account(User(user_id, username, Role(role)), salt, password_hash)
+        return _ACCOUNT_MAPPER.query_one(self._database, query, (username,))
 
     @staticmethod
     def _account_values(account: Account) -> tuple[str, str, bytes, bytes]:

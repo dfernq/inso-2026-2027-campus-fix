@@ -146,6 +146,23 @@ work** for open reports and **Resolve report** for reports in progress.
   The worker, refresh flow, and Tkinter table continue using the same
   interfaces.
 
+### Share cursor handling with Template Method
+
+The DAOs supply SQL and parameters to `RowMapper`. Its template methods open
+a Psycopg cursor with named columns, execute the query, and read one row or
+all rows in query order. Each concrete mapper defines `map_row()` to turn a
+row into an account, category, issue, or report summary.
+
+- **Correctness.** `query_one()` returns `None` when the query finds no row,
+  and `query_all()` returns an empty list. Both methods close the cursor even
+  if a mapper raises an exception.
+- **Readability.** The DAOs keep their SQL and parameters explicit. The
+  column mappings show which names are required, and cursor traversal lives
+  in one place.
+- **Flexibility.** A mapper can convert a new result shape by implementing
+  `map_row()`. The report summary mapper reuses issue conversion and adds
+  the reporter and category names from the join.
+
 ## Architecture
 
 ```mermaid
@@ -181,6 +198,9 @@ classDiagram
     UserDao --> DatabaseConnection : database
     IssueDao --> DatabaseConnection : database
     CategoryDao --> DatabaseConnection : database
+    UserDao ..> RowMapper : account mapping
+    IssueDao ..> RowMapper : report mapping
+    CategoryDao ..> RowMapper : category mapping
     CrudDao <|.. UserDao
     CrudDao <|.. IssueDao
     CrudDao <|.. CategoryDao
