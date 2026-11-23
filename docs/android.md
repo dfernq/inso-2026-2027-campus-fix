@@ -119,6 +119,23 @@ report being edited resets the form. A validation error preserves the draft.
   reuse the ViewModel's command scheduling, validation feedback, and list
   refresh. The Activity handles how to enter, display, and restore that mode.
 
+### Choose the report presentation by role
+
+The ViewModel selects a `ReportPresentation` strategy for the signed-in
+role and publishes its account heading, form visibility, and row actions
+through `LiveData`. Regular users can submit reports and manage their open
+reports. Administrators can start open reports and resolve reports in
+progress.
+
+- **Correctness.** Each strategy keeps the role's form setting and action
+  flags consistent. The Model filters visible reports and checks permission
+  and status before applying changes.
+- **Readability.** The ViewModel handles loading and refresh. Each role's
+  strategy groups its status checks, and both share the conversion to
+  `ReportDisplay`.
+- **Flexibility.** A change to a role's report controls stays in its strategy.
+  The Activity and list adapter continue rendering the same state.
+
 ## Architecture
 
 ```mermaid
@@ -137,6 +154,7 @@ classDiagram
     CampusFixViewModel --> DatabaseConnection : database
     CampusFixViewModel --> AuthenticationService : authentication
     CampusFixViewModel --> IssueService : reports
+    CampusFixViewModel ..> ReportPresentation : selects by role
     CampusFixViewModel --> CategoryService : categories
     AuthenticationService --> UserDao : users
     IssueService --> IssueDao : issues

@@ -16,7 +16,6 @@ import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import org.campusfix.android.R;
 import org.campusfix.model.auth.AuthenticationService;
-import org.campusfix.model.domain.Issue;
 import org.campusfix.model.domain.User;
 import org.campusfix.model.persistence.CategoryDao;
 import org.campusfix.model.persistence.DatabaseConnection;
@@ -230,9 +229,9 @@ public final class CampusFixViewModel extends ViewModel {
             return;
         }
         signedInUser = user;
-        boolean regular = user.role() == User.Role.REGULAR;
-        int title = regular ? R.string.regular_account : R.string.admin_account;
-        var account = new AccountDisplay(user.username(), title, regular);
+        var presentation = ReportPresentation.forRole(user.role());
+        var account = new AccountDisplay(
+                user.username(), presentation.accountTitle(), presentation.showsSubmissionForm());
         var initialReports = new ReportsState(List.of(), List.of(),
                 R.string.reports_loading, null, true, 0, 0, 0);
         state.setValue(new State(Status.READY, account, initialReports, null));
@@ -416,22 +415,14 @@ public final class CampusFixViewModel extends ViewModel {
 
     private ReportsState readReports(User viewer, ReportsState previous, int successMessage, int failureMessage) {
         try {
+            var presentation = ReportPresentation.forRole(viewer.role());
             var reports = new ArrayList<ReportDisplay>();
-            boolean regular = viewer.role() == User.Role.REGULAR;
-            boolean admin = viewer.role() == User.Role.ADMIN;
             for (var summary : issues().list(viewer)) {
-                var issue = summary.issue();
-                boolean open = issue.status() == Issue.Status.OPEN;
-                boolean canManage = regular && open;
-                boolean canStartWork = admin && open;
-                boolean canResolve = admin && issue.status() == Issue.Status.IN_PROGRESS;
-                reports.add(new ReportDisplay(issue.id(), issue.title(), issue.categoryId(), summary.categoryName(),
-                        issue.location(), summary.reporterName(), issue.status().name(), issue.description(),
-                        issue.resolutionNote(), canManage, canStartWork, canResolve));
+                reports.add(presentation.toDisplay(summary));
             }
 
             var categories = new ArrayList<CategoryOption>();
-            if (regular) {
+            if (presentation.showsSubmissionForm()) {
                 for (var category : issues().activeCategories()) {
                     categories.add(new CategoryOption(category.id(), category.name()));
                 }
