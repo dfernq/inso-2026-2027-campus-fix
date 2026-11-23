@@ -12,10 +12,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Executor;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
-import java.util.function.UnaryOperator;
 import org.campusfix.android.R;
 import org.campusfix.model.CampusFix;
+import org.campusfix.model.ModelChange;
+import org.campusfix.model.ModelChange.CategoryChanged;
+import org.campusfix.model.ModelChange.ReportChanged;
 import org.campusfix.model.domain.User;
 
 public final class CampusFixViewModel extends ViewModel {
@@ -102,8 +105,7 @@ public final class CampusFixViewModel extends ViewModel {
                          String description, String location) {
             viewModel.executeReportCommand(
                     user -> viewModel.model().submitReport(user, categoryId, title, description, location),
-                    R.string.report_submitting, R.string.report_submitted,
-                    R.string.report_save_failed, R.string.report_submitted_refresh_failed, ReportsState::afterSave);
+                    R.string.report_submitting, R.string.report_save_failed);
         }
     }
 
@@ -113,8 +115,7 @@ public final class CampusFixViewModel extends ViewModel {
                          String description, String location) {
             viewModel.executeReportCommand(
                     user -> viewModel.model().editReport(user, reportId, categoryId, title, description, location),
-                    R.string.report_saving, R.string.report_updated,
-                    R.string.report_save_failed, R.string.report_updated_refresh_failed, ReportsState::afterSave);
+                    R.string.report_saving, R.string.report_save_failed);
         }
 
         @Override
@@ -155,6 +156,7 @@ public final class CampusFixViewModel extends ViewModel {
     // See https://developer.android.com/topic/libraries/architecture/livedata#create_livedata_objects
     private final MutableLiveData<State> state = new MutableLiveData<>(new State(Status.READY));
     private final Handler mainThread = new Handler(Looper.getMainLooper());
+    private final Consumer<ModelChange> modelListener = this::onModelChange;
     private CampusFix model;
     private User signedInUser;
     private boolean cleared;
@@ -257,16 +259,14 @@ public final class CampusFixViewModel extends ViewModel {
 
     public void saveCategory(long categoryId, String name) {
         if (categoryId == 0) {
-            changeCategory(user -> model().createCategory(user, name), R.string.category_added, true);
+            changeCategory(user -> model().createCategory(user, name));
         } else {
-            changeCategory(user -> model().renameCategory(user, categoryId, name),
-                    R.string.category_renamed, true);
+            changeCategory(user -> model().renameCategory(user, categoryId, name));
         }
     }
 
     public void setCategoryActive(long categoryId, boolean active) {
-        int message = active ? R.string.category_reactivated : R.string.category_deactivated;
-        changeCategory(user -> model().setCategoryActive(user, categoryId, active), message, false);
+        changeCategory(user -> model().setCategoryActive(user, categoryId, active));
     }
 
     private void loadCategories(User administrator, CategoriesState previous) {
@@ -274,7 +274,7 @@ public final class CampusFixViewModel extends ViewModel {
         worker.execute(() -> publishCategories(administrator, readCategories(administrator, previous, 0)));
     }
 
-    private void changeCategory(CategoryChange change, int successMessage, boolean nameSaved) {
+    private void changeCategory(CategoryChange change) {
         var previous = state.getValue().categories();
         if (previous == null || previous.busy()) {
             return;
@@ -288,19 +288,10 @@ public final class CampusFixViewModel extends ViewModel {
             } catch (IllegalArgumentException exception) {
                 publishCategories(administrator, new CategoriesState(previous.items(), 0,
                         exception.getMessage(), false, previous.savedNameCount()));
-                return;
             } catch (SQLException exception) {
                 Log.w(TAG, "Saving the category failed.", exception);
                 publishCategories(administrator, previous.withStatus(R.string.category_save_failed, false));
-                return;
             }
-
-            long savedNameCount = previous.savedNameCount();
-            if (nameSaved) {
-                savedNameCount++;
-            }
-            var saved = new CategoriesState(previous.items(), successMessage, null, true, savedNameCount);
-            publishCategories(administrator, readCategories(administrator, saved, successMessage));
         });
     }
 
@@ -358,28 +349,20 @@ public final class CampusFixViewModel extends ViewModel {
 
     public void cancelReport(long issueId) {
         executeReportCommand(user -> model().cancelReport(user, issueId),
-                R.string.report_cancelling, R.string.report_cancelled,
-                R.string.report_cancel_failed, R.string.report_cancelled_refresh_failed,
-                reports -> reports.afterCancellation(issueId));
+                R.string.report_cancelling, R.string.report_cancel_failed);
     }
 
     public void startWork(long issueId) {
         executeReportCommand(user -> model().startWork(user, issueId),
-                R.string.report_starting_work, R.string.report_work_started,
-                R.string.report_start_work_failed, R.string.report_work_started_refresh_failed,
-                UnaryOperator.identity());
+                R.string.report_starting_work, R.string.report_start_work_failed);
     }
 
     public void resolveReport(long issueId, String note) {
         executeReportCommand(user -> model().resolveReport(user, issueId, note),
-                R.string.report_resolving, R.string.report_resolved,
-                R.string.report_resolve_failed, R.string.report_resolved_refresh_failed,
-                reports -> reports.afterResolution(issueId));
+                R.string.report_resolving, R.string.report_resolve_failed);
     }
 
-    private void executeReportCommand(ReportCommand command, int progressMessage, int successMessage,
-                                      int failureMessage, int refreshFailureMessage,
-                                      UnaryOperator<ReportsState> afterSuccess) {
+    private void executeReportCommand(ReportCommand command, int progressMessage, int failureMessage) {
         var reports = availableReports();
         if (reports == null) {
             return;
@@ -390,8 +373,6 @@ public final class CampusFixViewModel extends ViewModel {
         worker.execute(() -> {
             try {
                 command.execute(user);
-                var changed = afterSuccess.apply(reports);
-                publishReports(user, readReports(user, changed, successMessage, refreshFailureMessage));
             } catch (IllegalArgumentException exception) {
                 publishReports(user, reports.withValidationMessage(exception.getMessage()));
             } catch (SQLException exception) {
@@ -401,8 +382,57 @@ public final class CampusFixViewModel extends ViewModel {
         });
     }
 
+    private void onModelChange(ModelChange change) {
+        mainThread.post(() -> {
+            if (signedInUser != change.actor()) {
+                return;
+            }
+            var current = state.getValue();
+            if (change instanceof ReportChanged report && current.categories() == null) {
+                onReportChanged(report, current.reports());
+            } else if (change instanceof CategoryChanged category && current.categories() != null) {
+                onCategoryChanged(category, current.categories());
+            }
+        });
+    }
+
+    private void onReportChanged(ReportChanged change, ReportsState previous) {
+        var user = change.actor();
+        switch (change.kind()) {
+            case SUBMITTED -> loadReports(user, previous.afterSave(),
+                    R.string.report_submitted, R.string.report_submitted_refresh_failed);
+            case EDITED -> loadReports(user, previous.afterSave(),
+                    R.string.report_updated, R.string.report_updated_refresh_failed);
+            case CANCELLED -> loadReports(user, previous.afterCancellation(change.reportId()),
+                    R.string.report_cancelled, R.string.report_cancelled_refresh_failed);
+            case WORK_STARTED -> loadReports(user, previous,
+                    R.string.report_work_started, R.string.report_work_started_refresh_failed);
+            case RESOLVED -> loadReports(user, previous.afterResolution(change.reportId()),
+                    R.string.report_resolved, R.string.report_resolved_refresh_failed);
+        }
+    }
+
+    private void onCategoryChanged(CategoryChanged change, CategoriesState previous) {
+        int message = switch (change.kind()) {
+            case ADDED -> R.string.category_added;
+            case RENAMED -> R.string.category_renamed;
+            case ACTIVATED -> R.string.category_reactivated;
+            case DEACTIVATED -> R.string.category_deactivated;
+        };
+        boolean nameSaved = change.kind() == CategoryChanged.Kind.ADDED
+                || change.kind() == CategoryChanged.Kind.RENAMED;
+        long savedNameCount = previous.savedNameCount() + (nameSaved ? 1 : 0);
+        var saved = new CategoriesState(previous.items(), message, null, true, savedNameCount);
+        var administrator = change.actor();
+        worker.execute(() -> publishCategories(administrator, readCategories(administrator, saved, message)));
+    }
+
     private void loadReports(User viewer, ReportsState previous) {
-        worker.execute(() -> publishReports(viewer, readReports(viewer, previous, 0, R.string.reports_load_failed)));
+        loadReports(viewer, previous, 0, R.string.reports_load_failed);
+    }
+
+    private void loadReports(User viewer, ReportsState previous, int successMessage, int failureMessage) {
+        worker.execute(() -> publishReports(viewer, readReports(viewer, previous, successMessage, failureMessage)));
     }
 
     private ReportsState readReports(User viewer, ReportsState previous, int successMessage, int failureMessage) {
@@ -458,6 +488,7 @@ public final class CampusFixViewModel extends ViewModel {
     private CampusFix model() {
         if (model == null) {
             model = getModel.get();
+            model.addChangeListener(modelListener);
         }
         return model;
     }
@@ -473,6 +504,7 @@ public final class CampusFixViewModel extends ViewModel {
         if (model == null) {
             return;
         }
+        model.removeChangeListener(modelListener);
         try {
             model.close();
         } catch (SQLException exception) {

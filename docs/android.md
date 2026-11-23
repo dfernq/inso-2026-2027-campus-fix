@@ -77,17 +77,12 @@ note to the ViewModel. The command holds those values, and the ViewModel
 captures the current user before queueing the command. The command reaches
 `IssueService.resolve` with that user and those values.
 
-Submission, editing, cancellation, starting work, and resolution use
-`executeReportCommand` for worker scheduling and error handling. Each
-action supplies its own messages and the state update to apply after a
-successful write. For example, resolution records the resolved report ID so
-the Activity knows which note draft to clear. A validation error leaves the
-draft available to edit.
-
-The ViewModel publishes the result through `LiveData` for the current
-sign-in session. It reports a successful write even if the list refresh
-fails. A change to scheduling or completion handling applies across all
-five actions.
+At this stage, all five report actions use `executeReportCommand` for
+progress, worker scheduling, and completion. Each action supplies its
+messages and state updates. For example, resolution records the resolved
+report ID so the Activity can clear the matching draft. A validation error
+leaves the draft available to edit. The ViewModel publishes the result
+through `LiveData`, including when a write succeeds and its refresh fails.
 
 ### Adapt report rows for the Android list
 
@@ -169,6 +164,27 @@ the database worker. The first Model operation loads the device's private
   DAOs while preserving the operations used by the ViewModel. The ViewModel
   continues to publish the same `LiveData` state for the Activity to render.
 
+### Publish Model changes through LiveData using Observer
+
+The `CampusFix` facade publishes a `ModelChange` after a successful report
+or category write. The ViewModel subscribes on first Model use and
+unsubscribes when cleared. It handles the event on Android's main thread,
+queues a fresh list query on the database worker, and publishes the result
+through `LiveData`. The Activity observes that state. Use **Refresh** for
+changes made by other clients.
+
+- **Correctness.** A rejected write publishes no change event, so validation
+  preserves the draft. The ViewModel applies an event to its current sign-in
+  session and section. Report IDs let the Activity clear the matching edit
+  or resolution draft.
+- **Readability.** Commands handle progress and errors. The ViewModel's change
+  handlers keep each successful write's state updates, feedback, and refresh
+  together. The Activity renders one state.
+- **Flexibility.** The Activity can be recreated while the ViewModel keeps
+  its Model subscription and latest state. The new Activity observes that
+  state through its own lifecycle. Additional Model listeners can react to
+  the same writes without changing the Activity.
+
 ## Architecture
 
 ```mermaid
@@ -185,7 +201,9 @@ classDiagram
     MainActivity *-- CategoryPanel : category editor
     MainActivity *-- ReportListAdapter : report list renderer
     CategoryPanel ..> CampusFixViewModel : calls
-    CampusFixViewModel --> CampusFix : model
+    CampusFixViewModel --> CampusFix : calls and subscribes
+    CampusFixViewModel ..> ModelChange : handles
+    CampusFix ..> ModelChange : publishes
     CampusFixViewModel ..> ReportPresentation : selects by role
     CampusFix --> DatabaseConnection : database
     CampusFix --> AuthenticationService : authentication
@@ -219,13 +237,14 @@ classDiagram
   `LiveData<State>` for the Activity to observe. Updates go through a private
   `MutableLiveData`. The same ViewModel serves the recreated Activity after
   rotation. The ViewModel queues Model calls on the worker supplied by the
-  application. When cleared, it queues connection cleanup through the facade
-  if it has used the Model.
-- **Model.** `CampusFix` assembles the services and DAOs and exposes their
-  application operations. `AuthenticationService` verifies credentials,
-  `IssueService` enforces report rules, and `CategoryService` restricts category
-  management to administrators. The DAOs implement `CrudDao` with parameterized
-  JDBC queries. `DatabaseConnection` opens and reuses an autocommit connection.
+  application. It turns Model change notifications into screen state. When
+  cleared, it queues listener removal and connection cleanup on the worker.
+- **Model.** `CampusFix` assembles the services and DAOs, exposes their
+  application operations, and publishes changes after successful writes.
+  `AuthenticationService` verifies credentials, `IssueService` enforces report
+  rules, and `CategoryService` restricts category management to administrators.
+  The DAOs implement `CrudDao` with parameterized JDBC queries.
+  `DatabaseConnection` opens and reuses an autocommit connection.
 
 ## Run locally
 
