@@ -71,8 +71,8 @@ settings, avoiding separate PostgreSQL sessions with separate lifecycles.
 initialize the manager only once. The first call reads the root `.env`. The
 manager opens the Psycopg connection when the Controller first needs it.
 
-The entry point passes the manager to the Controller and DAOs. Integration
-tests can still supply their own manager configured for `campusfix_test`.
+At this stage, the entry point passes the manager to the Controller and
+DAOs. Integration tests can supply a manager configured for `campusfix_test`.
 
 ### Launch the desktop client
 
@@ -85,7 +85,7 @@ Tkinter client.
 The Controller uses `functools.partial` to bind the arguments to each report
 operation before sending it to the database worker. For **Resolve report**,
 the resulting `ReportCommand` holds the signed-in user, report ID, and note
-read on the Tkinter event thread. The worker later calls `IssueService`
+read on the Tkinter event thread. The command later reaches `IssueService`
 with those captured values, and the Model applies the report rules.
 
 Submission, editing, cancellation, starting work, and resolution share the
@@ -163,6 +163,22 @@ row into an account, category, issue, or report summary.
   `map_row()`. The report summary mapper reuses issue conversion and adds
   the reporter and category names from the join.
 
+### Give the Controller one Model entry point with Facade
+
+The entry point creates a `CampusFix` facade with the desktop connection
+manager. The facade assembles the DAOs and services and exposes operations
+such as `sign_in()`, `resolve_report()`, and `rename_category()` to the
+Controller.
+
+- **Correctness.** All DAOs receive the same connection manager. The services
+  continue to validate requests and enforce permission and status rules.
+- **Readability.** The Controller receives one Model dependency and calls
+  methods named for application operations. The facade keeps the service and
+  DAO wiring together.
+- **Flexibility.** The Model can change how it assembles its services while
+  preserving the operations used by the Controller. The services and DAOs
+  remain independently testable.
+
 ## Architecture
 
 ```mermaid
@@ -177,18 +193,17 @@ classDiagram
     Main ..> CampusFixController : creates
     Main ..> desktop_database : gets instance
     desktop_database --> DatabaseConnection : shared manager
-    Main ..> AuthenticationService : creates
-    Main ..> UserDao : creates
-    Main ..> IssueService : creates
-    Main ..> IssueDao : creates
-    Main ..> CategoryService : creates
-    Main ..> CategoryDao : creates
+    Main ..> CampusFix : creates
     CampusFixController --> CampusFixView : view
     CampusFixController ..> ReportPresentation : selects by role
-    CampusFixController --> DatabaseConnection : database
-    CampusFixController --> AuthenticationService : authentication
-    CampusFixController --> IssueService : reports
-    CampusFixController --> CategoryService : categories
+    CampusFixController --> CampusFix : model
+    CampusFix --> DatabaseConnection : database
+    CampusFix --> AuthenticationService : authentication
+    CampusFix --> IssueService : reports
+    CampusFix --> CategoryService : categories
+    CampusFix ..> UserDao : creates
+    CampusFix ..> IssueDao : creates
+    CampusFix ..> CategoryDao : creates
     CampusFixView *-- CategoryPanel : category editor
     CampusFixView *-- ReportTable : report table adapter
     AuthenticationService --> UserDao : users
@@ -206,11 +221,11 @@ classDiagram
     CrudDao <|.. CategoryDao
 ```
 
-The entry point gets the shared `DatabaseConnection` from `desktop_database`
-and passes it to the Controller and the three DAOs. The Controller creates
-the View and binds callbacks for account, report, and category actions,
-refresh, and the connection check. The View renders the forms and lists and
-forwards actions through those callbacks.
+The entry point gets the connection manager from `desktop_database`, creates
+the `CampusFix` facade, and passes it to the Controller. The Controller
+creates the View and binds callbacks for account, report, and category
+actions, refresh, and the connection check. The View renders the forms and
+lists and forwards actions through those callbacks.
 
 The Controller runs database work on one worker and updates the View on the
 Tkinter event thread. The Model opens a connection on first use and reuses it in

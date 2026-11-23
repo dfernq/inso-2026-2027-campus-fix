@@ -4,7 +4,7 @@ from functools import partial
 from typing import Protocol
 
 from campusfix.model.domain.user import User
-from campusfix.model.reports.issue_service import IssueService
+from campusfix.model.facade import CampusFix
 
 
 ReportCommand = Callable[[], object]
@@ -19,7 +19,7 @@ class ReportSave:
 
 class ReportFormState(Protocol):
     def prepare_save(
-        self, reports: IssueService, user: User, category_id: int,
+        self, model: CampusFix, user: User, category_id: int,
         title: str, description: str, location: str,
     ) -> ReportSave: ...
 
@@ -28,11 +28,11 @@ class ReportFormState(Protocol):
 
 class NewReport:
     def prepare_save(
-        self, reports: IssueService, user: User, category_id: int,
+        self, model: CampusFix, user: User, category_id: int,
         title: str, description: str, location: str,
     ) -> ReportSave:
         return ReportSave(
-            partial(reports.submit, user, category_id, title, description, location),
+            partial(model.submit_report, user, category_id, title, description, location),
             "Submitting report...",
             "Report submitted.",
         )
@@ -46,11 +46,11 @@ class EditingReport:
     report_id: int
 
     def prepare_save(
-        self, reports: IssueService, user: User, category_id: int,
+        self, model: CampusFix, user: User, category_id: int,
         title: str, description: str, location: str,
     ) -> ReportSave:
         return ReportSave(
-            partial(reports.edit, user, self.report_id, category_id, title, description, location),
+            partial(model.edit_report, user, self.report_id, category_id, title, description, location),
             "Saving report...",
             "Report updated.",
         )

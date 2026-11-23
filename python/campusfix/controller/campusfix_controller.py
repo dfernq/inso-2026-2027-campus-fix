@@ -14,13 +14,10 @@ from campusfix.controller.report_form_state import (
     ReportFormState,
 )
 from campusfix.controller.report_presentation import presentation_for
-from campusfix.model.auth.authentication_service import AuthenticationService
 from campusfix.model.domain.category import Category
 from campusfix.model.domain.issue import Status
 from campusfix.model.domain.user import Role, User
-from campusfix.model.persistence.database_connection import DatabaseConnection
-from campusfix.model.reports.category_service import CategoryService
-from campusfix.model.reports.issue_service import IssueService
+from campusfix.model.facade import CampusFix
 from campusfix.view.campusfix_view import CampusFixView, CategoryOption
 from campusfix.view.category_panel import CategoryRow
 from campusfix.view.report_table import ReportRow
@@ -31,17 +28,8 @@ T = TypeVar("T")
 
 
 class CampusFixController:
-    def __init__(
-        self,
-        database: DatabaseConnection,
-        authentication: AuthenticationService,
-        reports: IssueService,
-        categories: CategoryService,
-    ) -> None:
-        self._database = database
-        self._authentication = authentication
-        self._reports = reports
-        self._categories = categories
+    def __init__(self, model: CampusFix) -> None:
+        self._model = model
         self._window = Tk()
         self._view = CampusFixView(self._window)
         self._worker = ThreadPoolExecutor(max_workers=1)
@@ -71,13 +59,13 @@ class CampusFixController:
             try:
                 self._window.mainloop()
             finally:
-                self._worker.submit(self._database.close).result()
+                self._worker.submit(self._model.close).result()
 
     def _sign_in(self) -> None:
         username = self._view.username()
         password = self._view.take_password()
         self._view.show_status("Signing in...", busy=True)
-        result = self._worker.submit(self._authentication.sign_in, username, password)
+        result = self._worker.submit(self._model.sign_in, username, password)
         self._when_ready(result, self._complete_sign_in)
 
     def _complete_sign_in(self, result: Future[User | None]) -> None:
@@ -127,7 +115,7 @@ class CampusFixController:
             return
         message = f"{change_message} Refreshing..." if change_message else "Loading categories..."
         self._show_category_status(message, busy=True)
-        result = self._worker.submit(self._categories.list, user)
+        result = self._worker.submit(self._model.list_categories, user)
         self._when_ready(
             result,
             lambda completed: self._complete_category_load(completed, change_message),
@@ -159,7 +147,7 @@ class CampusFixController:
             return
         panel = self._view.category_panel
         self._change_category(
-            partial(self._categories.create, user, panel.new_name()),
+            partial(self._model.create_category, user, panel.new_name()),
             "Category added.",
             on_success=panel.clear_new_name,
         )
@@ -171,7 +159,7 @@ class CampusFixController:
         if user is None or category is None:
             return
         self._change_category(
-            partial(self._categories.rename, user, category.id, panel.selected_name()),
+            partial(self._model.rename_category, user, category.id, panel.selected_name()),
             "Category renamed.",
         )
 
@@ -181,7 +169,7 @@ class CampusFixController:
         if user is None or category is None:
             return
         self._change_category(
-            partial(self._categories.set_active, user, category.id, not category.active),
+            partial(self._model.set_category_active, user, category.id, not category.active),
             "Category deactivated." if category.active else "Category reactivated.",
         )
 
@@ -237,13 +225,13 @@ class CampusFixController:
 
     def _report_data(self, user: User) -> tuple[list[ReportRow], list[CategoryOption]]:
         presentation = presentation_for(user.role)
-        rows = [presentation.to_row(report) for report in self._reports.list(user)]
+        rows = [presentation.to_row(report) for report in self._model.list_reports(user)]
 
         categories = []
         if presentation.shows_submission_form:
             categories = [
                 CategoryOption(category.id, category.name)
-                for category in self._reports.active_categories()
+                for category in self._model.active_categories()
             ]
         return rows, categories
 
@@ -283,7 +271,7 @@ class CampusFixController:
         if user is None:
             return
         save = self._report_form.prepare_save(
-            self._reports,
+            self._model,
             user,
             self._view.report_category_id(),
             self._view.report_title(),
@@ -308,7 +296,7 @@ class CampusFixController:
 
         on_success = self._reset_report_form if self._report_form.edits(report.id) else None
         self._execute_report_command(
-            partial(self._reports.cancel, user, report.id),
+            partial(self._model.cancel_report, user, report.id),
             progress_message="Cancelling report...",
             success_message="Report cancelled.",
             failure_message="Could not cancel the report.",
@@ -328,7 +316,7 @@ class CampusFixController:
         if resolving:
             note = self._view.resolution_note()
             self._execute_report_command(
-                partial(self._reports.resolve, user, report.id, note),
+                partial(self._model.resolve_report, user, report.id, note),
                 progress_message="Resolving report...",
                 success_message="Report resolved.",
                 failure_message="Could not resolve the report.",
@@ -336,7 +324,7 @@ class CampusFixController:
             )
         else:
             self._execute_report_command(
-                partial(self._reports.start_work, user, report.id),
+                partial(self._model.start_work, user, report.id),
                 progress_message="Starting work...",
                 success_message="Work started.",
                 failure_message="Could not start work.",
@@ -388,7 +376,7 @@ class CampusFixController:
 
     def _check_connection(self) -> None:
         self._view.show_status("Checking PostgreSQL...", busy=True)
-        result = self._worker.submit(self._database.check_connection)
+        result = self._worker.submit(self._model.check_connection)
         self._when_ready(result, self._complete_connection_check)
 
     def _complete_connection_check(self, result: Future[bool]) -> None:
