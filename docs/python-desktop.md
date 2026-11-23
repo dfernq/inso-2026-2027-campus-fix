@@ -88,15 +88,11 @@ the resulting `ReportCommand` holds the signed-in user, report ID, and note
 read on the Tkinter event thread. The command later reaches `IssueService`
 with those captured values, and the Model applies the report rules.
 
-Submission, editing, cancellation, starting work, and resolution share the
-same execution path in `_execute_report_command`. The Controller shows
-progress, queues the command, and handles errors or refreshes the report list
-when it completes. Each action supplies its own messages and any cleanup it
-needs. Resolution clears the draft note after a successful write, so a
-validation error leaves the note available to edit.
-
-A change to scheduling or error handling now applies across all five actions.
-Signing out cancels any pending UI callback for the previous session.
+At this stage, all five report actions use `_execute_report_command()` for
+progress, worker scheduling, and completion. Each action supplies its
+messages and any cleanup. For example, resolution clears the draft note
+after the write succeeds, so a validation error leaves the note available
+to edit. Signing out cancels the pending UI callback for that session.
 
 ### Adapt report rows for the Tkinter table
 
@@ -122,8 +118,8 @@ form to `NewReport`. A validation error preserves the state and form values.
   record. Selecting another row leaves the save target intact. The Controller
   also checks that ID before clearing a draft after cancellation.
 - **Readability.** The state names make the form mode explicit. Each state's
-  `prepare_save()` method keeps its Model operation next to its progress and
-  success messages.
+  `prepare_save()` method keeps its Model operation next to its progress
+  message.
 - **Flexibility.** A new form mode can follow the same `ReportFormState`
   contract and prepare its own command. The Controller defines its transitions
   and reuses the existing worker scheduling, validation feedback, and refresh.
@@ -179,6 +175,26 @@ Controller.
   preserving the operations used by the Controller. The services and DAOs
   remain independently testable.
 
+### Refresh the desktop View using Observer
+
+The `CampusFix` facade publishes a `ModelChange` after a report or category
+write succeeds. The Controller subscribes with a listener that puts each
+event on a thread-safe queue. Tkinter reads the queue on its event thread,
+then the Controller shows the result and asks the database worker to reload
+the affected list. When the window closes, the Controller unsubscribes and
+cancels the queue callback. Use **Refresh** to see writes from other clients.
+
+- **Correctness.** A rejected or failed write sends no change event, so
+  validation keeps the draft available. Events for a previous sign-in
+  session are ignored. Report events carry the report ID so cancelling a
+  different report leaves the current edit intact.
+- **Readability.** Commands handle progress and errors. The Controller's
+  change handlers keep the success messages, draft cleanup, and refresh
+  together. The facade publishes what changed without any Tkinter dependency.
+- **Flexibility.** Another listener can react to the same change without
+  altering the database operation. The Controller decides how to present
+  the result in Tkinter.
+
 ## Architecture
 
 ```mermaid
@@ -196,7 +212,9 @@ classDiagram
     Main ..> CampusFix : creates
     CampusFixController --> CampusFixView : view
     CampusFixController ..> ReportPresentation : selects by role
-    CampusFixController --> CampusFix : model
+    CampusFixController --> CampusFix : calls and subscribes
+    CampusFixController ..> ModelChange : handles
+    CampusFix ..> ModelChange : publishes
     CampusFix --> DatabaseConnection : database
     CampusFix --> AuthenticationService : authentication
     CampusFix --> IssueService : reports
@@ -227,11 +245,11 @@ creates the View and binds callbacks for account, report, and category
 actions, refresh, and the connection check. The View renders the forms and
 lists and forwards actions through those callbacks.
 
-The Controller runs database work on one worker and updates the View on the
-Tkinter event thread. The Model opens a connection on first use and reuses it in
-autocommit mode. Closing the window lets any ongoing operation finish before the
-worker closes the connection. Restart the app if an established connection is
-lost.
+The Controller runs database work on one worker and handles Model events on
+the Tkinter event thread. The Model opens a connection on first use and reuses
+it in autocommit mode. Closing the window lets any ongoing operation finish
+before the worker closes the connection. Restart the app if an established
+connection is lost.
 
 ## Run locally
 

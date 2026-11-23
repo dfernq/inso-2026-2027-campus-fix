@@ -2,6 +2,7 @@ import logging
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from functools import partial
+from queue import Empty, SimpleQueue
 from tkinter import Tk
 from typing import TypeVar
 
@@ -18,6 +19,13 @@ from campusfix.model.domain.category import Category
 from campusfix.model.domain.issue import Status
 from campusfix.model.domain.user import Role, User
 from campusfix.model.facade import CampusFix
+from campusfix.model.model_change import (
+    CategoryChanged,
+    CategoryChangeKind,
+    ModelChange,
+    ReportChanged,
+    ReportChangeKind,
+)
 from campusfix.view.campusfix_view import CampusFixView, CategoryOption
 from campusfix.view.category_panel import CategoryRow
 from campusfix.view.report_table import ReportRow
@@ -37,6 +45,8 @@ class CampusFixController:
         self._report_form: ReportFormState = NewReport()
         self._managing_categories = False
         self._pending_callback: str | None = None
+        self._model_changes: SimpleQueue[ModelChange] = SimpleQueue()
+        self._model_listener = self._model_changes.put
         self._view.on_sign_in(self._sign_in)
         self._view.on_check(self._check_connection)
         self._view.on_sign_out(self._sign_out)
@@ -52,6 +62,8 @@ class CampusFixController:
         self._view.on_start_work(lambda: self._advance_report(Status.IN_PROGRESS))
         self._view.on_resolve_report(lambda: self._advance_report(Status.RESOLVED))
         self._window.protocol("WM_DELETE_WINDOW", self._close_window)
+        self._model.add_change_listener(self._model_listener)
+        self._poll_model_changes()
 
     def start(self) -> None:
         self._view.show_sign_in()
@@ -148,8 +160,6 @@ class CampusFixController:
         panel = self._view.category_panel
         self._change_category(
             partial(self._model.create_category, user, panel.new_name()),
-            "Category added.",
-            on_success=panel.clear_new_name,
         )
 
     def _rename_category(self) -> None:
@@ -160,7 +170,6 @@ class CampusFixController:
             return
         self._change_category(
             partial(self._model.rename_category, user, category.id, panel.selected_name()),
-            "Category renamed.",
         )
 
     def _toggle_category_active(self) -> None:
@@ -170,42 +179,21 @@ class CampusFixController:
             return
         self._change_category(
             partial(self._model.set_category_active, user, category.id, not category.active),
-            "Category deactivated." if category.active else "Category reactivated.",
         )
 
-    def _change_category(
-        self,
-        action: Callable[[], None],
-        message: str,
-        *,
-        on_success: Callable[[], None] | None = None,
-    ) -> None:
+    def _change_category(self, action: Callable[[], None]) -> None:
         self._show_category_status("Saving category...", busy=True)
         result = self._worker.submit(action)
-        self._when_ready(
-            result,
-            lambda completed: self._complete_category_change(completed, message, on_success),
-        )
+        self._when_ready(result, self._complete_category_change)
 
-    def _complete_category_change(
-        self,
-        result: Future[None],
-        message: str,
-        on_success: Callable[[], None] | None,
-    ) -> None:
+    def _complete_category_change(self, result: Future[None]) -> None:
         try:
             result.result()
         except ValueError as error:
             self._show_category_status(str(error), busy=False)
-            return
         except psycopg.Error:
             logger.exception("Saving category failed.")
             self._show_category_status("Could not save the category.", busy=False)
-            return
-
-        if on_success is not None:
-            on_success()
-        self._load_categories(change_message=message)
 
     def _show_category_status(self, message: str, *, busy: bool) -> None:
         self._view.set_navigation_busy(busy)
@@ -281,9 +269,7 @@ class CampusFixController:
         self._execute_report_command(
             save.command,
             progress_message=save.progress_message,
-            success_message=save.success_message,
             failure_message="Could not save the report.",
-            on_success=self._reset_report_form,
         )
 
     def _cancel_report(self) -> None:
@@ -294,13 +280,10 @@ class CampusFixController:
         if not report.can_manage or not self._view.confirm_cancellation(report.id):
             return
 
-        on_success = self._reset_report_form if self._report_form.edits(report.id) else None
         self._execute_report_command(
             partial(self._model.cancel_report, user, report.id),
             progress_message="Cancelling report...",
-            success_message="Report cancelled.",
             failure_message="Could not cancel the report.",
-            on_success=on_success,
         )
 
     def _advance_report(self, target_status: Status) -> None:
@@ -318,15 +301,12 @@ class CampusFixController:
             self._execute_report_command(
                 partial(self._model.resolve_report, user, report.id, note),
                 progress_message="Resolving report...",
-                success_message="Report resolved.",
                 failure_message="Could not resolve the report.",
-                on_success=partial(self._view.clear_resolution_note, report.id),
             )
         else:
             self._execute_report_command(
                 partial(self._model.start_work, user, report.id),
                 progress_message="Starting work...",
-                success_message="Work started.",
                 failure_message="Could not start work.",
             )
 
@@ -335,44 +315,79 @@ class CampusFixController:
         command: ReportCommand,
         *,
         progress_message: str,
-        success_message: str,
         failure_message: str,
-        on_success: Callable[[], None] | None = None,
     ) -> None:
         self._view.show_report_status(progress_message, busy=True)
         result = self._worker.submit(command)
         self._when_ready(
-            result,
-            partial(
-                self._complete_report_change,
-                message=success_message,
-                failure_message=failure_message,
-                on_success=on_success,
-            ),
+            result, partial(self._complete_report_change, failure_message=failure_message)
         )
 
-    def _complete_report_change(
-        self,
-        result: Future[object],
-        message: str,
-        failure_message: str,
-        *,
-        on_success: Callable[[], None] | None,
-    ) -> None:
+    def _complete_report_change(self, result: Future[object], failure_message: str) -> None:
         try:
             result.result()
         except ValueError as error:
             self._view.show_report_status(str(error), busy=False)
-            return
         except psycopg.Error:
             logger.exception(failure_message)
             self._view.show_report_status(failure_message, busy=False)
-            return
 
+    def _poll_model_changes(self) -> None:
+        # Let the current worker result finish before a change queues another load.
+        if self._pending_callback is None:
+            try:
+                change = self._model_changes.get_nowait()
+            except Empty:
+                pass
+            else:
+                self._on_model_change(change)
+        self._change_callback = self._window.after(50, self._poll_model_changes)
+
+    def _on_model_change(self, change: ModelChange) -> None:
+        if change.actor is not self._signed_in_user:
+            return
+        if isinstance(change, ReportChanged):
+            self._on_report_changed(change)
+        else:
+            self._on_category_changed(change)
+
+    def _on_report_changed(self, change: ReportChanged) -> None:
+        clear_draft: Callable[[], None] | None = None
+        match change.kind:
+            case ReportChangeKind.SUBMITTED:
+                message = "Report submitted."
+                clear_draft = self._reset_report_form
+            case ReportChangeKind.EDITED:
+                message = "Report updated."
+                clear_draft = self._reset_report_form
+            case ReportChangeKind.CANCELLED:
+                message = "Report cancelled."
+                if self._report_form.edits(change.report_id):
+                    clear_draft = self._reset_report_form
+            case ReportChangeKind.WORK_STARTED:
+                message = "Work started."
+            case ReportChangeKind.RESOLVED:
+                message = "Report resolved."
+                clear_draft = partial(self._view.clear_resolution_note, change.report_id)
+
+        # Tkinter ignores edits to disabled fields.
         self._view.show_report_status(message, busy=False)
-        if on_success is not None:
-            on_success()
+        if clear_draft is not None:
+            clear_draft()
         self._load_reports(change_message=message)
+
+    def _on_category_changed(self, change: CategoryChanged) -> None:
+        match change.kind:
+            case CategoryChangeKind.ADDED:
+                self._view.category_panel.clear_new_name()
+                message = "Category added."
+            case CategoryChangeKind.RENAMED:
+                message = "Category renamed."
+            case CategoryChangeKind.ACTIVATED:
+                message = "Category reactivated."
+            case CategoryChangeKind.DEACTIVATED:
+                message = "Category deactivated."
+        self._load_categories(change_message=message)
 
     def _check_connection(self) -> None:
         self._view.show_status("Checking PostgreSQL...", busy=True)
@@ -408,5 +423,7 @@ class CampusFixController:
             self._pending_callback = None
 
     def _close_window(self) -> None:
+        self._model.remove_change_listener(self._model_listener)
+        self._window.after_cancel(self._change_callback)
         self._cancel_pending_callback()
         self._window.destroy()

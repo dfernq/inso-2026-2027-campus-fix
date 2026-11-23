@@ -14,7 +14,6 @@ ReportCommand = Callable[[], object]
 class ReportSave:
     command: ReportCommand
     progress_message: str
-    success_message: str
 
 
 class ReportFormState(Protocol):
@@ -34,7 +33,6 @@ class NewReport:
         return ReportSave(
             partial(model.submit_report, user, category_id, title, description, location),
             "Submitting report...",
-            "Report submitted.",
         )
 
     def edits(self, report_id: int) -> bool:
@@ -52,7 +50,6 @@ class EditingReport:
         return ReportSave(
             partial(model.edit_report, user, self.report_id, category_id, title, description, location),
             "Saving report...",
-            "Report updated.",
         )
 
     def edits(self, report_id: int) -> bool:
