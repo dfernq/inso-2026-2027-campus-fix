@@ -31,7 +31,7 @@ public final class CampusFixController {
     private final CategoryPanel categoryPanel;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private User signedInUser;
-    private long editingReportId;
+    private ReportFormState reportForm = new NewReport();
     private boolean managingCategories;
     private boolean closing;
 
@@ -54,7 +54,7 @@ public final class CampusFixController {
         view.onSubmitReport(this::saveReport);
         view.onEditReport(this::beginEdit);
         view.onCancelReport(this::cancelReport);
-        view.onDiscardEdit(this::discardEdit);
+        view.onDiscardEdit(this::resetReportForm);
         view.onStartWork(() -> advanceReport(Issue.Status.IN_PROGRESS));
         view.onResolveReport(() -> advanceReport(Issue.Status.RESOLVED));
         view.onClose(this::close);
@@ -97,7 +97,7 @@ public final class CampusFixController {
 
     private void signOut() {
         signedInUser = null;
-        editingReportId = 0;
+        reportForm = new NewReport();
         managingCategories = false;
         categoryPanel.reset();
         view.showSignIn();
@@ -240,12 +240,12 @@ public final class CampusFixController {
         if (report == null || !report.canManage()) {
             return;
         }
-        editingReportId = report.id();
+        reportForm = new EditingReport(report.id());
         view.showReportForEditing(report);
     }
 
-    private void discardEdit() {
-        editingReportId = 0;
+    private void resetReportForm() {
+        reportForm = new NewReport();
         view.clearReportForm();
     }
 
@@ -254,17 +254,44 @@ public final class CampusFixController {
         if (user == null) {
             return;
         }
-        long reportId = editingReportId;
-        long category = view.reportCategoryId();
-        String title = view.reportTitle();
-        String location = view.reportLocation();
-        String description = view.reportDescription();
-        if (reportId == 0) {
-            executeReportCommand(user, () -> reports.submit(user, category, title, description, location),
-                    "Submitting report...", "Report submitted.", "Could not save the report.", this::discardEdit);
-        } else {
-            executeReportCommand(user, () -> reports.edit(user, reportId, category, title, description, location),
-                    "Saving report...", "Report updated.", "Could not save the report.", this::discardEdit);
+        reportForm.save(user, view.reportCategoryId(), view.reportTitle(),
+                view.reportDescription(), view.reportLocation());
+    }
+
+    private interface ReportFormState {
+        void save(User user, long categoryId, String title, String description, String location);
+
+        default boolean edits(long reportId) {
+            return false;
+        }
+    }
+
+    private final class NewReport implements ReportFormState {
+        @Override
+        public void save(User user, long categoryId, String title, String description, String location) {
+            executeReportCommand(user, () -> reports.submit(user, categoryId, title, description, location),
+                    "Submitting report...", "Report submitted.", "Could not save the report.",
+                    CampusFixController.this::resetReportForm);
+        }
+    }
+
+    private final class EditingReport implements ReportFormState {
+        private final long reportId;
+
+        private EditingReport(long reportId) {
+            this.reportId = reportId;
+        }
+
+        @Override
+        public void save(User user, long categoryId, String title, String description, String location) {
+            executeReportCommand(user, () -> reports.edit(user, reportId, categoryId, title, description, location),
+                    "Saving report...", "Report updated.", "Could not save the report.",
+                    CampusFixController.this::resetReportForm);
+        }
+
+        @Override
+        public boolean edits(long reportId) {
+            return this.reportId == reportId;
         }
     }
 
@@ -280,8 +307,8 @@ public final class CampusFixController {
 
         executeReportCommand(user, () -> reports.cancel(user, report.id()),
                 "Cancelling report...", "Report cancelled.", "Could not cancel the report.", () -> {
-                    if (editingReportId == report.id()) {
-                        discardEdit();
+                    if (reportForm.edits(report.id())) {
+                        resetReportForm();
                     }
                 });
     }

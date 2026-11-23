@@ -114,6 +114,25 @@ The View restores the selection by report ID, so the same report stays
 selected when a newer report moves it down the list. The adapter stays in
 the View layer and works with the presentation data supplied by the Controller.
 
+### Give the report form explicit states
+
+The Controller uses the **State** pattern to decide what the form does on
+save. `NewReport` queues a submission. Choosing **Edit report** switches to
+`EditingReport`, which queues an update. A successful save, discard, sign-out,
+or cancellation of the report being edited returns the form to `NewReport`.
+A validation error keeps the state and draft available for correction.
+
+- **Correctness.** `EditingReport` requires a report ID when it is created and
+  keeps that ID for the life of the edit. Selecting another table row leaves the
+  save target intact. The Controller also uses the stored ID to decide whether
+  a cancellation should clear the draft.
+- **Readability.** The state names make the form mode explicit. The Controller
+  calls `reportForm.save(...)`, and each state keeps its Model operation next
+  to its progress and completion messages.
+- **Flexibility.** A new form mode can implement `ReportFormState` with its own
+  save behavior. The Controller defines when to enter and leave that state,
+  and the state can reuse the existing command scheduling and error handling.
+
 ## Architecture
 
 The `java/model` module contains database access without a UI dependency.
