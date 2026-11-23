@@ -128,6 +128,24 @@ form to `NewReport`. A validation error preserves the state and form values.
   contract and prepare its own command. The Controller defines its transitions
   and reuses the existing worker scheduling, validation feedback, and refresh.
 
+### Choose the report presentation by role
+
+The Controller uses the **Strategy** pattern to prepare the report screen.
+`presentation_for()` selects a `ReportPresentation` for the signed-in role.
+The regular strategy shows the submission form and enables edits and
+cancellations for open reports. The administrator strategy enables **Start
+work** for open reports and **Resolve report** for reports in progress.
+
+- **Correctness.** Each role's strategy supplies the form setting and action
+  flags together. The Model filters report visibility and checks permission
+  and status before applying changes.
+- **Readability.** The Controller loads reports and refreshes the screen.
+  Each strategy defines which actions its role can see, and both strategies
+  share the conversion to a `ReportRow`.
+- **Flexibility.** Changes to a role's report controls stay in its strategy.
+  The worker, refresh flow, and Tkinter table continue using the same
+  interfaces.
+
 ## Architecture
 
 ```mermaid
@@ -149,6 +167,7 @@ classDiagram
     Main ..> CategoryService : creates
     Main ..> CategoryDao : creates
     CampusFixController --> CampusFixView : view
+    CampusFixController ..> ReportPresentation : selects by role
     CampusFixController --> DatabaseConnection : database
     CampusFixController --> AuthenticationService : authentication
     CampusFixController --> IssueService : reports

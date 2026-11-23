@@ -13,6 +13,7 @@ from campusfix.controller.report_form_state import (
     ReportCommand,
     ReportFormState,
 )
+from campusfix.controller.report_presentation import presentation_for
 from campusfix.model.auth.authentication_service import AuthenticationService
 from campusfix.model.domain.category import Category
 from campusfix.model.domain.issue import Status
@@ -92,9 +93,10 @@ class CampusFixController:
             return
 
         self._signed_in_user = user
-        regular = user.role is Role.REGULAR
-        title = "Regular account" if regular else "Administrator account"
-        self._view.show_account(title, user.username, can_submit=regular)
+        presentation = presentation_for(user.role)
+        self._view.show_account(
+            presentation.account_title, user.username, can_submit=presentation.shows_submission_form
+        )
         self._load_reports()
 
     def _sign_out(self) -> None:
@@ -234,33 +236,11 @@ class CampusFixController:
         )
 
     def _report_data(self, user: User) -> tuple[list[ReportRow], list[CategoryOption]]:
-        rows = []
-        for report in self._reports.list(user):
-            issue = report.issue
-            admin = user.role is Role.ADMIN
-            open_report = issue.status is Status.OPEN
-            can_manage = user.role is Role.REGULAR and open_report
-            can_start_work = admin and open_report
-            can_resolve = admin and issue.status is Status.IN_PROGRESS
-            rows.append(
-                ReportRow(
-                    issue.id,
-                    issue.title,
-                    issue.category_id,
-                    report.category_name,
-                    issue.location,
-                    report.reporter_name,
-                    issue.status.value,
-                    issue.description,
-                    issue.resolution_note,
-                    can_manage,
-                    can_start_work,
-                    can_resolve,
-                )
-            )
+        presentation = presentation_for(user.role)
+        rows = [presentation.to_row(report) for report in self._reports.list(user)]
 
         categories = []
-        if user.role is Role.REGULAR:
+        if presentation.shows_submission_form:
             categories = [
                 CategoryOption(category.id, category.name)
                 for category in self._reports.active_categories()
